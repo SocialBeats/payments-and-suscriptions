@@ -57,7 +57,7 @@ async function triggerWebhook() {
     console.log('\n📤 Enviando webhook a localhost:3010...');
 
     // Llamar al webhook local
-    const response = await fetch('http://localhost:3010/api/v1/payments/webhook', {
+    const response = await fetch('http://localhost:3006/api/v1/payments/webhook', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

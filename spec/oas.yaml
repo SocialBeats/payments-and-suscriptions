@@ -4,7 +4,7 @@ info:
   version: unknown
   description: This is the Payments and Subscriptions microservice API for SocialBeats
 servers:
-  - url: http://localhost:3010
+  - url: http://localhost:3000
 components:
   securitySchemes:
     bearerAuth:
