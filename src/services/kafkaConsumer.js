@@ -41,14 +41,6 @@ async function processEvent(event) {
               logger.info(`Canceled Stripe subscription ${subscription.stripeSubscriptionId}`);
             }
 
-            // Cancelar contrato en SPACE si existe
-            try {
-              await spaceService.cancelSpaceContract({ userId });
-              logger.info(`Canceled SPACE contract for user ${userId}`);
-            } catch (spaceError) {
-              logger.warn(`Failed to cancel SPACE contract: ${spaceError.message}`);
-            }
-
             // Eliminar registro de la base de datos
             await Subscription.deleteOne({ _id: subscription._id });
             logger.info(`Deleted subscription ${subscription._id} from database`);
@@ -58,6 +50,14 @@ async function processEvent(event) {
               err.message
             );
           }
+        }
+
+        // Eliminar contrato en SPACE (fuera del loop, una sola vez por usuario)
+        try {
+          await spaceService.deleteSpaceContract(userId);
+          logger.info(`Deleted SPACE contract for user ${userId}`);
+        } catch (spaceError) {
+          logger.warn(`Failed to delete SPACE contract: ${spaceError.message}`);
         }
 
         logger.info(`Successfully processed USER_DELETED for user ${userId}`);

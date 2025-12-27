@@ -187,3 +187,43 @@ export const cancelSpaceContract = async (userId) => {
     }
   });
 };
+
+/**
+ * Eliminar completamente un contrato de SPACE
+ * Usado cuando se elimina un usuario del sistema
+ *
+ * @param {string} userId - ID del usuario
+ * @returns {Promise<void>}
+ */
+export const deleteSpaceContract = async (userId) => {
+  try {
+    logger.info(`Deleting SPACE contract for user ${userId}`);
+
+    // Hacer llamada HTTP directa al endpoint de SPACE
+    const response = await fetch(`${SPACE_URL}/api/v1/contracts/${userId}`, {
+      method: 'DELETE',
+      headers: {
+        'x-api-key': SPACE_API_KEY,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (response.ok) {
+      logger.info(`SPACE contract deleted successfully for user ${userId}`);
+      return;
+    }
+
+    // Si el contrato no existe (404), no es un error crítico
+    if (response.status === 404) {
+      logger.info(`SPACE contract not found for user ${userId}, already deleted`);
+      return;
+    }
+
+    // Cualquier otro error
+    const errorText = await response.text();
+    throw new Error(`Failed to delete SPACE contract: ${response.status} ${errorText}`);
+  } catch (error) {
+    logger.error(`Error deleting SPACE contract for user ${userId}: ${error.message}`);
+    throw error;
+  }
+};
