@@ -158,8 +158,9 @@ export const cancelSpaceContract = async (userId) => {
       spaceClient.on('synchronized', async () => {
         try {
           // Downgrade a FREE o marcar como inactivo
-          await spaceClient.contracts.updateContract(userId, {
-            subscriptionPlans: { news: 'FREE' },
+          await spaceClient.contracts.updateContractSubscription(userId, {
+            contractedServices: { news: '1.0' },
+            subscriptionPlans: { news: 'BASIC' },
             subscriptionAddOns: {},
           });
 
