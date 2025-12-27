@@ -14,6 +14,8 @@ import healthRoutes from './src/routes/healthRoutes.js';
 import subscriptionRoutes from './src/routes/subscriptionRoutes.js';
 // import controllers
 import * as subscriptionController from './src/controllers/subscriptionController.js';
+// import kafka
+import { startKafkaConsumer, isKafkaEnabled } from './src/services/kafkaConsumer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,6 +52,16 @@ let server;
 
 if (process.env.NODE_ENV !== 'test') {
   await connectDB();
+
+  // Iniciar consumidor de Kafka si está habilitado
+  if (isKafkaEnabled()) {
+    logger.info('🔄 Kafka is enabled, starting consumer...');
+    startKafkaConsumer().catch((err) => {
+      logger.error('Failed to start Kafka consumer:', err);
+    });
+  } else {
+    logger.info('⚠️  Kafka is disabled');
+  }
 
   server = app.listen(PORT, () => {
     logger.warn(`Using log level: ${process.env.LOG_LEVEL}`);
