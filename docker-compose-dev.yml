@@ -1,26 +1,26 @@
 version: "3.8"
 
 services:
-  mongodb:
+  payments-and-suscription-mongodb:
     restart: unless-stopped
     image: mongo:latest
-    container_name: mongodb
+    container_name: payments-and-suscription-mongodb
     environment:
       - MONGO_INITDB_ROOT_USERNAME=${MONGOADMIN}
       - MONGO_INITDB_ROOT_PASSWORD=${MONGOPASS}
     networks:
       - socialbeats-network
     ports:
-      - "27017:27017"
+      - "27020:27017"
     volumes:
       - mongo-data:/data/db
 
-  template:
+  payments-and-suscription:
     restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile-dev
-    container_name: template
+    container_name: payments-and-suscription
     environment:
       - MONGOURL=${MONGOURL}
       - MONGOADMIN=${MONGOADMIN}
@@ -31,8 +31,21 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - API_TITLE=${API_TITLE}
       - API_DESCRIPTION=${API_DESCRIPTION}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+      - STRIPE_PRICE_BASIC=${STRIPE_PRICE_BASIC}
+      - STRIPE_PRICE_PREMIUM=${STRIPE_PRICE_PREMIUM}
+      - SPACE_URL=${SPACE_URL}
+      - SPACE_API_KEY=${SPACE_API_KEY}
+      - FRONTEND_URL=${FRONTEND_URL}
+      - ENABLE_KAFKA=${ENABLE_KAFKA}
+      - KAFKA_BROKER=${KAFKA_BROKER}
+      - KAFKA_CONNECTION_MAX_RETRIES=${KAFKA_CONNECTION_MAX_RETRIES}
+      - KAFKA_CONNECTION_RETRY_DELAY=${KAFKA_CONNECTION_RETRY_DELAY}
+      - KAFKA_COOLDOWN=${KAFKA_COOLDOWN}
     depends_on:
-      - mongodb
+      - payments-and-suscription-mongodb
     networks:
       - socialbeats-network
     ports:
@@ -47,4 +60,4 @@ volumes:
 
 networks:
   socialbeats-network:
-    driver: bridge
+    external: true
