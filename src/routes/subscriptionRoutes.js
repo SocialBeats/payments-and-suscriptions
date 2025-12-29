@@ -139,8 +139,117 @@ router.get(
 /**
  * @swagger
  * /api/v1/payments/subscription:
+ *   put:
+ *     summary: Actualizar el plan de suscripción del usuario
+ *     tags: [Payments]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - planType
+ *             properties:
+ *               planType:
+ *                 type: string
+ *                 enum: [BASIC, PREMIUM]
+ *                 description: Nuevo tipo de plan (BASIC €0/mes, PREMIUM €10/mes)
+ *               prorationBehavior:
+ *                 type: string
+ *                 enum: [create_prorations, none, always_invoice]
+ *                 default: create_prorations
+ *                 description: |
+ *                   Comportamiento del prorrateo:
+ *                   - create_prorations: Crear cargos/créditos prorrateados (recomendado)
+ *                   - none: Aplicar cambio al inicio del siguiente periodo
+ *                   - always_invoice: Siempre crear factura inmediata
+ *     responses:
+ *       200:
+ *         description: Plan actualizado exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                 subscription:
+ *                   type: object
+ *                   properties:
+ *                     planType:
+ *                       type: string
+ *                     status:
+ *                       type: string
+ *                     currentPeriodStart:
+ *                       type: string
+ *                       format: date-time
+ *                     currentPeriodEnd:
+ *                       type: string
+ *                       format: date-time
+ *                     isActive:
+ *                       type: boolean
+ *                 proration:
+ *                   type: object
+ *                   properties:
+ *                     behavior:
+ *                       type: string
+ *                     note:
+ *                       type: string
+ *       400:
+ *         description: Datos inválidos o usuario ya tiene ese plan
+ *       401:
+ *         description: No autenticado
+ *       404:
+ *         description: Suscripción no encontrada
+ *       500:
+ *         description: Error del servidor
+ */
+router.put('/subscription', verifyToken, subscriptionController.updateSubscriptionPlan);
+
+/**
+ * @swagger
+ * /api/v1/payments/subscription/complete-upgrade:
+ *   post:
+ *     summary: Completar upgrade después de añadir método de pago
+ *     tags: [Payments]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - setupSessionId
+ *             properties:
+ *               setupSessionId:
+ *                 type: string
+ *                 description: ID de la sesión de setup de Stripe completada
+ *     responses:
+ *       200:
+ *         description: Upgrade completado exitosamente
+ *       400:
+ *         description: Sesión de setup no completada o datos inválidos
+ *       404:
+ *         description: Suscripción no encontrada
+ *       500:
+ *         description: Error del servidor
+ */
+router.post(
+  '/subscription/complete-upgrade',
+  verifyToken,
+  subscriptionController.completeUpgrade
+);
+
+/**
+ * @swagger
+ * /api/v1/payments/subscription:
  *   delete:
- *     summary: Cancelar suscripción del usuario
+ *     summary: Cancelar suscripción del usuario y downgrade a FREE
  *     tags: [Payments]
  *     security:
  *       - bearerAuth: []
@@ -153,10 +262,29 @@ router.get(
  *               immediate:
  *                 type: boolean
  *                 default: false
- *                 description: Si cancelar inmediatamente o al final del periodo
+ *                 description: |
+ *                   - true: Cancela inmediatamente y crea suscripción FREE
+ *                   - false: Cancela al final del periodo, luego crea FREE
  *     responses:
  *       200:
- *         description: Suscripción cancelada
+ *         description: Suscripción cancelada y usuario downgradeado a FREE
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Subscription canceled and downgraded to FREE plan"
+ *                 subscription:
+ *                   type: object
+ *                   properties:
+ *                     planType:
+ *                       type: string
+ *                       example: "BASIC"
+ *                     status:
+ *                       type: string
+ *                       example: "active"
  *       401:
  *         description: No autenticado
  *       404:

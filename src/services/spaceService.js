@@ -49,7 +49,8 @@ export const createSpaceContract = async ({
             );
 
             // Actualizar plan existente
-            await spaceClient.contracts.updateContract(userId, {
+            await spaceClient.contracts.updateContractSubscription(userId, {
+              contractedServices: { news: '1.0' },
               subscriptionPlans: { [SPACE_SERVICE_NAME]: plan },
               subscriptionAddOns: addOns,
             });
@@ -130,7 +131,8 @@ export const updateSpaceContract = async ({ userId, plan, addOns = {} }) => {
 
       spaceClient.on('synchronized', async () => {
         try {
-          await spaceClient.contracts.updateContract(userId, {
+          await spaceClient.contracts.updateContractSubscription(userId, {
+            contractedServices: { news: '1.0' },
             subscriptionPlans: { [SPACE_SERVICE_NAME]: plan },
             subscriptionAddOns: addOns,
           });

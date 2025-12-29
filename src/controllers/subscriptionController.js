@@ -206,18 +206,28 @@ export const getSubscriptionStatus = async (req, res) => {
 /**
  * Crear una suscripción del plan básico usando el spaceService, en el cuerpo de la petición se pasarán
  * userId, username y plan.
- * Además, crea el registro local de Subscription y el cliente en Stripe.
+ * Además, crea el registro local de Subscription, el cliente en Stripe y la suscripción gratuita.
  */
 export const createFreeContract = async (req, res) => {
   try {
-    const { userId, username, plan } = req.body;
+    const { userId, username, plan, email } = req.body;
 
     if (!userId || !username || !plan) {
       return res.status(400).json({
         error: 'MISSING_REQUIRED_FIELDS',
-        message: 'Missing required fields in request',
+        message: 'userId, username and plan are required',
       });
     }
+
+    // Validar que el plan sea BASIC (gratuito)
+    if (plan !== 'BASIC') {
+      return res.status(400).json({
+        error: 'INVALID_PLAN',
+        message: 'This endpoint only creates BASIC (free) plans',
+      });
+    }
+
+    logger.info(`Creating free contract for user ${userId} (${username})`);
 
     // 1. Crear contrato en SPACE
     const contract = await spaceService.createSpaceContract({
@@ -226,32 +236,486 @@ export const createFreeContract = async (req, res) => {
       plan,
     });
 
-    // 2. Crear/Actualizar suscripción local en MongoDB
-    // Para el plan BASIC (gratuito), lo marcamos como activo directamente.
-    // No creamos Customer en Stripe todavía (se creará si decide pagar en el futuro).
+    logger.info(`✅ SPACE contract created for user ${userId}`);
+
+    // 2. Crear Customer en Stripe
+    const customerEmail = email || `${username}@socialbeats.com`;
+    const customer = await stripeService.getOrCreateCustomer(customerEmail, {
+      userId,
+      username,
+    });
+
+    logger.info(`✅ Stripe customer created/retrieved: ${customer.id}`);
+
+    // 3. Crear suscripción gratuita en Stripe
+    const freePriceId = stripeService.getPriceIdForPlan('BASIC');
+    const stripeSubscription = await stripeService.createFreeSubscription({
+      customerId: customer.id,
+      priceId: freePriceId,
+      metadata: {
+        userId,
+        username,
+        planType: 'BASIC',
+      },
+    });
+
+    logger.info(`✅ Free Stripe subscription created: ${stripeSubscription.id}`);
+
+    // 4. Crear/Actualizar suscripción local en MongoDB con todos los datos
     const subscription = await Subscription.findOneAndUpdate(
       { userId },
       {
         userId,
         username,
-        // email: idealmente lo tendríamos, pero no es crítico para free
-        planType: plan, // 'BASIC'
+        email: customerEmail,
+        planType: 'BASIC',
         status: 'active',
-        // stripeCustomerId: se generará solo cuando vaya a pagar
+        stripeCustomerId: customer.id,
+        stripeSubscriptionId: stripeSubscription.id,
+        stripePriceId: freePriceId,
+        currentPeriodStart: new Date(stripeSubscription.current_period_start * 1000),
+        currentPeriodEnd: new Date(stripeSubscription.current_period_end * 1000),
+        cancelAtPeriodEnd: false,
       },
       { upsert: true, new: true }
     );
 
+    logger.info(`✅ Local subscription created in MongoDB for user ${userId}`);
+
     res.status(200).json({
-      message: 'Contract and local subscription created successfully',
+      message: 'Free contract and Stripe subscription created successfully',
       contract,
-      subscription,
+      subscription: {
+        userId: subscription.userId,
+        username: subscription.username,
+        email: subscription.email,
+        planType: subscription.planType,
+        status: subscription.status,
+        stripeCustomerId: subscription.stripeCustomerId,
+        stripeSubscriptionId: subscription.stripeSubscriptionId,
+        currentPeriodStart: subscription.currentPeriodStart,
+        currentPeriodEnd: subscription.currentPeriodEnd,
+        isActive: subscription.isActive(),
+      },
     });
   } catch (error) {
-    logger.error(`Error creating contract: ${error.message}`);
+    logger.error(`Error creating free contract: ${error.message}`);
+    logger.error(`Error stack: ${error.stack}`);
     res.status(500).json({
       error: 'CONTRACT_ERROR',
-      message: 'Failed to create contract',
+      message: 'Failed to create free contract',
+      details: error.message,
+    });
+  }
+};
+
+/**
+ * Actualizar el plan de suscripción del usuario
+ *
+ * @route PUT /api/v1/payments/subscription
+ * @access Private (requiere JWT)
+ */
+export const updateSubscriptionPlan = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const username = req.user.username;
+    const { planType, prorationBehavior = 'create_prorations' } = req.body;
+
+    // Validación de datos
+    if (!planType) {
+      return res.status(400).json({
+        error: 'MISSING_PLAN_TYPE',
+        message: 'Plan type is required',
+      });
+    }
+
+    // Validar plan válido
+    const validPlans = ['BASIC', 'PREMIUM'];
+    if (!validPlans.includes(planType)) {
+      return res.status(400).json({
+        error: 'INVALID_PLAN_TYPE',
+        message: `Plan type must be one of: ${validPlans.join(', ')}`,
+      });
+    }
+
+    // Validar proration behavior
+    const validProrationBehaviors = ['create_prorations', 'none', 'always_invoice'];
+    if (!validProrationBehaviors.includes(prorationBehavior)) {
+      return res.status(400).json({
+        error: 'INVALID_PRORATION_BEHAVIOR',
+        message: `Proration behavior must be one of: ${validProrationBehaviors.join(', ')}`,
+      });
+    }
+
+    logger.info(
+      `Updating subscription plan for user ${userId} to: ${planType} (proration: ${prorationBehavior})`
+    );
+
+    // Buscar suscripción existente
+    const subscription = await Subscription.findOne({ userId });
+
+    if (!subscription) {
+      return res.status(404).json({
+        error: 'SUBSCRIPTION_NOT_FOUND',
+        message: 'No subscription found for this user',
+      });
+    }
+
+    // Si no tiene stripeSubscriptionId, es un usuario sin suscripción en Stripe
+    if (!subscription.stripeSubscriptionId) {
+      return res.status(400).json({
+        error: 'NO_STRIPE_SUBSCRIPTION',
+        message:
+          'User does not have a Stripe subscription. Please create one first using checkout.',
+      });
+    }
+
+    // Verificar que no sea el mismo plan
+    if (subscription.planType === planType) {
+      return res.status(400).json({
+        error: 'SAME_PLAN',
+        message: `User already has ${planType} plan`,
+        subscription: {
+          planType: subscription.planType,
+          status: subscription.status,
+        },
+      });
+    }
+
+    // Obtener el nuevo Price ID
+    const newPriceId = stripeService.getPriceIdForPlan(planType);
+
+    // Determinar si es upgrade o downgrade (comparar precios)
+    const planPrices = { BASIC: 0, PREMIUM: 10 };
+    const currentPrice = planPrices[subscription.planType] || 0;
+    const newPrice = planPrices[planType] || 0;
+    const isUpgrade = newPrice > currentPrice;
+
+    // Si es upgrade a plan de pago, verificar que tenga método de pago
+    if (isUpgrade && newPrice > 0) {
+      logger.info(`User ${userId} attempting upgrade from ${subscription.planType} to ${planType}`);
+      
+      // Verificar si el customer tiene un default payment method configurado
+      const customer = await stripeService.stripe.customers.retrieve(
+        subscription.stripeCustomerId,
+        { expand: ['invoice_settings.default_payment_method'] }
+      );
+      
+      const hasDefaultPaymentMethod = customer.default_payment_method || 
+                                      customer.invoice_settings?.default_payment_method ||
+                                      customer.default_source;
+
+      if (!hasDefaultPaymentMethod) {
+        logger.warn(`❌ User ${userId} has no DEFAULT payment method`);
+        
+        // Buscar payment methods adjuntos
+        const paymentMethods = await stripeService.stripe.paymentMethods.list({
+          customer: subscription.stripeCustomerId,
+          type: 'card',
+          limit: 1,
+        });
+
+        // Si tiene payment methods pero no hay default, configurar el primero
+        if (paymentMethods.data.length > 0) {
+          logger.info(`🔧 Found ${paymentMethods.data.length} payment method(s), setting first as default`);
+          
+          try {
+            await stripeService.setDefaultPaymentMethod(
+              subscription.stripeCustomerId,
+              paymentMethods.data[0].id
+            );
+            logger.info(`✅ Payment method ${paymentMethods.data[0].id} set as default automatically`);
+          } catch (error) {
+            logger.error(`Failed to set default payment method: ${error.message}`);
+            // Continuar con crear setup session
+          }
+        } else {
+          // No tiene ningún payment method, crear sesión de setup
+          logger.warn(`❌ User ${userId} has NO payment methods attached`);
+
+          let frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+          frontendUrl = frontendUrl.replace(/\/$/, '');
+          
+          try {
+            const setupSession = await stripeService.createSetupSession({
+              customerId: subscription.stripeCustomerId,
+              successUrl: `${frontendUrl}/app/pricing?setup=success&upgrade_to=${planType}&session_id={CHECKOUT_SESSION_ID}`,
+              cancelUrl: `${frontendUrl}/app/pricing?setup=canceled`,
+              metadata: {
+                userId,
+                username,
+                pendingUpgradeTo: planType,
+              },
+            });
+
+            logger.info(`Setup session created for user ${userId}: ${setupSession.id}`);
+
+            return res.status(402).json({
+              error: 'PAYMENT_METHOD_REQUIRED',
+              message: 'Payment method required for upgrade. Please add a payment method first.',
+              setupUrl: setupSession.url,
+              setupSessionId: setupSession.id,
+            });
+          } catch (setupError) {
+            logger.error(`Failed to create setup session: ${setupError.message}`);
+            
+            return res.status(500).json({
+              error: 'SETUP_SESSION_ERROR',
+              message: 'Failed to create payment setup session',
+              details: setupError.message,
+            });
+          }
+        }
+      } else {
+        logger.info(`✅ User ${userId} has default payment method configured`);
+      }
+    }
+
+    // Determinar el comportamiento de prorrateo inteligente
+    let effectiveProrationBehavior = prorationBehavior;
+    
+    // Si no se especificó, usar comportamiento inteligente
+    if (prorationBehavior === 'create_prorations') {
+      effectiveProrationBehavior = isUpgrade 
+        ? 'create_prorations'  // Upgrade: cobrar diferencia y acceso inmediato
+        : 'none';              // Downgrade: mantener plan hasta fin de periodo
+      
+      logger.info(
+        `Auto-detected ${isUpgrade ? 'upgrade' : 'downgrade'}, using proration: ${effectiveProrationBehavior}`
+      );
+    }
+
+    // Actualizar en Stripe
+    const updatedStripeSubscription = await stripeService.updateSubscriptionPlan({
+      subscriptionId: subscription.stripeSubscriptionId,
+      newPriceId,
+      prorationBehavior: effectiveProrationBehavior,
+    });
+
+    // Actualizar en base de datos
+    subscription.planType = planType;
+    subscription.stripePriceId = newPriceId;
+    subscription.status = updatedStripeSubscription.status;
+    subscription.currentPeriodStart = new Date(
+      updatedStripeSubscription.current_period_start * 1000
+    );
+    subscription.currentPeriodEnd = new Date(
+      updatedStripeSubscription.current_period_end * 1000
+    );
+    await subscription.save();
+
+    logger.info(`Subscription plan updated in database for user ${userId}`);
+
+    // Actualizar en SPACE
+    try {
+      await spaceService.updateSpaceContract({
+        userId,
+        plan: planType,
+      });
+      logger.info(`SPACE contract updated to ${planType} for user ${userId}`);
+    } catch (error) {
+      logger.error(`Failed to update SPACE contract: ${error.message}`);
+      // No fallar la request, el webhook puede sincronizar después
+    }
+
+    res.status(200).json({
+      message: 'Subscription plan updated successfully',
+      subscription: {
+        planType: subscription.planType,
+        status: subscription.status,
+        currentPeriodStart: subscription.currentPeriodStart,
+        currentPeriodEnd: subscription.currentPeriodEnd,
+        isActive: subscription.isActive(),
+      },
+      change: {
+        type: isUpgrade ? 'upgrade' : 'downgrade',
+        from: currentPrice,
+        to: newPrice,
+      },
+      proration: {
+        behavior: effectiveProrationBehavior,
+        note:
+          effectiveProrationBehavior === 'create_prorations'
+            ? isUpgrade
+              ? 'Prorated charges will be applied. You have immediate access to new features.'
+              : 'Prorated credits will be applied to your next invoice.'
+            : isUpgrade
+              ? 'Changes will take effect immediately.'
+              : 'You will keep your current plan until the end of the billing period.',
+      },
+    });
+  } catch (error) {
+    logger.error(`Error updating subscription plan: ${error.message}`);
+    logger.error(`Error stack: ${error.stack}`);
+    
+    // Si el error es de Stripe sobre método de pago, dar una respuesta específica
+    if (error.message && error.message.includes('no attached payment source')) {
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      
+      // Intentar obtener la suscripción para crear sesión de setup
+      try {
+        const subscription = await Subscription.findOne({ userId: req.user.id });
+        
+        if (subscription && subscription.stripeCustomerId) {
+          const setupSession = await stripeService.createSetupSession({
+            customerId: subscription.stripeCustomerId,
+            successUrl: `${frontendUrl}/pricing?setup=success&upgrade_to=${req.body.planType}`,
+            cancelUrl: `${frontendUrl}/pricing?setup=canceled`,
+            metadata: {
+              userId: req.user.id,
+              username: req.user.username,
+              pendingUpgradeTo: req.body.planType,
+            },
+          });
+
+          return res.status(402).json({
+            error: 'PAYMENT_METHOD_REQUIRED',
+            message: 'Payment method required for upgrade. Please add a payment method first.',
+            setupUrl: setupSession.url,
+            setupSessionId: setupSession.id,
+          });
+        }
+      } catch (setupError) {
+        logger.error(`Failed to create setup session in error handler: ${setupError.message}`);
+      }
+    }
+    
+    res.status(500).json({
+      error: 'SUBSCRIPTION_UPDATE_ERROR',
+      message: 'Failed to update subscription plan',
+      details: error.message,
+    });
+  }
+};
+
+/**
+ * Completar upgrade pendiente después de añadir método de pago
+ * Se llama después de que el usuario completa el setup de Stripe
+ *
+ * @route POST /api/v1/payments/subscription/complete-upgrade
+ * @access Private (requiere JWT)
+ */
+export const completeUpgrade = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { setupSessionId } = req.body;
+
+    if (!setupSessionId) {
+      return res.status(400).json({
+        error: 'MISSING_SETUP_SESSION_ID',
+        message: 'Setup session ID is required',
+      });
+    }
+
+    logger.info(`Completing upgrade for user ${userId} after payment method setup`);
+
+    // Verificar la sesión de setup
+    const setupSession = await stripeService.getSetupSession(setupSessionId);
+
+    if (setupSession.status !== 'complete') {
+      return res.status(400).json({
+        error: 'SETUP_NOT_COMPLETE',
+        message: 'Payment method setup is not complete',
+      });
+    }
+
+    // Obtener el payment method de la sesión
+    const paymentMethodId =
+      setupSession.setup_intent?.payment_method?.id ||
+      setupSession.setup_intent?.payment_method;
+
+    if (!paymentMethodId) {
+      logger.error('No payment method found in setup session');
+      return res.status(400).json({
+        error: 'NO_PAYMENT_METHOD',
+        message: 'No payment method found in completed setup session',
+      });
+    }
+
+    logger.info(`Payment method found: ${paymentMethodId}`);
+
+    // Obtener el plan al que quiere hacer upgrade desde metadata
+    const pendingUpgradeTo = setupSession.metadata?.pendingUpgradeTo;
+
+    if (!pendingUpgradeTo) {
+      return res.status(400).json({
+        error: 'NO_PENDING_UPGRADE',
+        message: 'No pending upgrade found in session metadata',
+      });
+    }
+
+    // Buscar suscripción del usuario
+    const subscription = await Subscription.findOne({ userId });
+
+    if (!subscription || !subscription.stripeSubscriptionId) {
+      return res.status(404).json({
+        error: 'SUBSCRIPTION_NOT_FOUND',
+        message: 'No subscription found for this user',
+      });
+    }
+
+    // Configurar el payment method como default del customer
+    try {
+      await stripeService.setDefaultPaymentMethod(
+        subscription.stripeCustomerId,
+        paymentMethodId
+      );
+      logger.info(`✅ Payment method ${paymentMethodId} set as default`);
+    } catch (error) {
+      logger.error(`Failed to set default payment method: ${error.message}`);
+      return res.status(500).json({
+        error: 'SET_PAYMENT_METHOD_ERROR',
+        message: 'Failed to set payment method as default',
+        details: error.message,
+      });
+    }
+
+    // Ahora que tiene método de pago configurado, actualizar el plan
+    const newPriceId = stripeService.getPriceIdForPlan(pendingUpgradeTo);
+    
+    const updatedStripeSubscription = await stripeService.updateSubscriptionPlan({
+      subscriptionId: subscription.stripeSubscriptionId,
+      newPriceId,
+      prorationBehavior: 'create_prorations',
+    });
+
+    // Actualizar en base de datos
+    subscription.planType = pendingUpgradeTo;
+    subscription.stripePriceId = newPriceId;
+    subscription.status = updatedStripeSubscription.status;
+    subscription.currentPeriodStart = new Date(
+      updatedStripeSubscription.current_period_start * 1000
+    );
+    subscription.currentPeriodEnd = new Date(
+      updatedStripeSubscription.current_period_end * 1000
+    );
+    await subscription.save();
+
+    // Actualizar en SPACE
+    try {
+      await spaceService.updateSpaceContract({
+        userId,
+        plan: pendingUpgradeTo,
+      });
+    } catch (error) {
+      logger.error(`Failed to update SPACE contract: ${error.message}`);
+    }
+
+    res.status(200).json({
+      message: 'Upgrade completed successfully',
+      subscription: {
+        planType: subscription.planType,
+        status: subscription.status,
+        currentPeriodStart: subscription.currentPeriodStart,
+        currentPeriodEnd: subscription.currentPeriodEnd,
+        isActive: subscription.isActive(),
+      },
+    });
+  } catch (error) {
+    logger.error(`Error completing upgrade: ${error.message}`);
+    res.status(500).json({
+      error: 'COMPLETE_UPGRADE_ERROR',
+      message: 'Failed to complete upgrade',
       details: error.message,
     });
   }
@@ -288,7 +752,7 @@ export const cancelSubscription = async (req, res) => {
       `Canceling subscription for user ${userId}, immediate: ${immediate}`
     );
 
-    // Cancelar en Stripe
+    // Cancelar suscripción PREMIUM/de pago en Stripe
     let stripeSubscription;
     if (immediate) {
       stripeSubscription = await stripeService.cancelSubscriptionImmediately(
@@ -307,21 +771,71 @@ export const cancelSubscription = async (req, res) => {
       stripeSubscription.cancel_at_period_end || immediate;
     subscription.canceledAt = new Date();
     await subscription.save();
+    logger.info(`Stripe subscription ${subscription.stripeSubscriptionId} canceled`);
 
-    // Si es cancelación inmediata, actualizar SPACE
+    // Si es cancelación inmediata, crear suscripción FREE y actualizar SPACE
     if (immediate) {
       try {
+        // Crear suscripción FREE en Stripe
+        const freePriceId = stripeService.getPriceIdForPlan('BASIC');
+        const freeSubscription = await stripeService.createFreeSubscription({
+          customerId: subscription.stripeCustomerId,
+          priceId: freePriceId,
+          metadata: {
+            userId,
+            username: subscription.username,
+            planType: 'BASIC',
+          },
+        });
+
+        logger.info(`Free subscription created: ${freeSubscription.id}`);
+
+        // Actualizar en base de datos con nueva suscripción FREE
+        subscription.stripeSubscriptionId = freeSubscription.id;
+        subscription.stripePriceId = freePriceId;
+        subscription.planType = 'BASIC';
+        subscription.status = 'active';
+        subscription.currentPeriodStart = new Date(freeSubscription.current_period_start * 1000);
+        subscription.currentPeriodEnd = new Date(freeSubscription.current_period_end * 1000);
+        subscription.cancelAtPeriodEnd = false;
+        subscription.canceledAt = new Date();
+        await subscription.save();
+
+        // Downgrade a BASIC en SPACE
         await spaceService.cancelSpaceContract(userId);
+
+        logger.info(`User ${userId} downgraded to FREE plan successfully`);
       } catch (error) {
-        logger.error(`Failed to cancel SPACE contract: ${error.message}`);
-        // No fallar la request, SPACE se actualizará con webhook
+        logger.error(`Failed to create FREE subscription: ${error.message}`);
+        
+        // Si falla la creación de FREE, al menos actualizar DB a canceled
+        subscription.status = stripeSubscription.status;
+        subscription.cancelAtPeriodEnd = true;
+        subscription.canceledAt = new Date();
+        await subscription.save();
+
+        return res.status(500).json({
+          error: 'FREE_SUBSCRIPTION_ERROR',
+          message: 'Subscription canceled but failed to create FREE plan. Please contact support.',
+          details: error.message,
+        });
       }
+    } else {
+      // Cancelación al final del periodo: solo marcar para cancelar
+      subscription.status = stripeSubscription.status;
+      subscription.cancelAtPeriodEnd = stripeSubscription.cancel_at_period_end;
+      subscription.canceledAt = new Date();
+      await subscription.save();
+
+      logger.info(
+        `Subscription will be canceled at period end: ${subscription.currentPeriodEnd}`
+      );
     }
 
     res.status(200).json({
       message: immediate
-        ? 'Subscription canceled immediately'
-        : 'Subscription will be canceled at the end of billing period',
+        ? 'Subscription canceled and downgraded to FREE plan'
+        : 'Subscription will be canceled at the end of billing period, then downgraded to FREE',
       subscription: {
         planType: subscription.planType,
         status: subscription.status,
@@ -562,7 +1076,7 @@ const handleSubscriptionUpdated = async (stripeSubscription) => {
  */
 const handleSubscriptionDeleted = async (stripeSubscription) => {
   try {
-    const { id } = stripeSubscription;
+    const { id, customer } = stripeSubscription;
 
     const subscription = await Subscription.findOne({
       stripeSubscriptionId: id,
@@ -575,15 +1089,46 @@ const handleSubscriptionDeleted = async (stripeSubscription) => {
       return;
     }
 
-    subscription.status = 'canceled';
-    subscription.canceledAt = new Date();
-    await subscription.save();
+    logger.info(`Subscription deleted for user ${subscription.userId}, creating FREE plan`);
 
-    logger.info(`Subscription deleted for user ${subscription.userId}`);
+    try {
+      // Crear suscripción FREE automáticamente
+      const freePriceId = stripeService.getPriceIdForPlan('BASIC');
+      const freeSubscription = await stripeService.createFreeSubscription({
+        customerId: subscription.stripeCustomerId || customer,
+        priceId: freePriceId,
+        metadata: {
+          userId: subscription.userId,
+          username: subscription.username,
+          planType: 'BASIC',
+        },
+      });
 
-    // Cancelar contrato en SPACE
+      // Actualizar registro con nueva suscripción FREE
+      subscription.stripeSubscriptionId = freeSubscription.id;
+      subscription.stripePriceId = freePriceId;
+      subscription.planType = 'BASIC';
+      subscription.status = 'active';
+      subscription.currentPeriodStart = new Date(freeSubscription.current_period_start * 1000);
+      subscription.currentPeriodEnd = new Date(freeSubscription.current_period_end * 1000);
+      subscription.cancelAtPeriodEnd = false;
+      subscription.canceledAt = new Date();
+      await subscription.save();
+
+      logger.info(`FREE subscription created for user ${subscription.userId}`);
+    } catch (error) {
+      logger.error(`Failed to create FREE subscription: ${error.message}`);
+      
+      // Si falla, al menos marcar como cancelado
+      subscription.status = 'canceled';
+      subscription.canceledAt = new Date();
+      await subscription.save();
+    }
+
+    // Downgrade a BASIC en SPACE
     try {
       await spaceService.cancelSpaceContract(subscription.userId);
+      logger.info(`SPACE contract downgraded to BASIC for user ${subscription.userId}`);
     } catch (error) {
       logger.error(`Failed to cancel SPACE contract: ${error.message}`);
     }
