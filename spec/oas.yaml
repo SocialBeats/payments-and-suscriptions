@@ -167,6 +167,13 @@ paths:
                   db:
                     type: string
                     example: connected
+                  kafka:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                      connected:
+                        type: boolean
   /api/v1/payments/checkout:
     post:
       summary: Crear una sesión de checkout de Stripe
@@ -292,4 +299,61 @@ paths:
           description: Webhook procesado exitosamente
         '400':
           description: Firma inválida o error de procesamiento
+  /api/v1/payments/internal/free-contract:
+    post:
+      summary: Crear un contrato de suscripción gratuito
+      tags:
+        - Payments
+      security:
+        - internalAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - userId
+                - username
+                - plan
+              properties:
+                userId:
+                  type: string
+                  description: ID del usuario
+                username:
+                  type: string
+                  description: Nombre de usuario
+                plan:
+                  type: string
+                  enum:
+                    - BASIC
+                    - PREMIUM
+                  description: Tipo de plan a contratar
+      responses:
+        '200':
+          description: Contrato creado exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  contract:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      userId:
+                        type: string
+                      username:
+                        type: string
+                      plan:
+                        type: string
+        '400':
+          description: Datos inválidos
+        '401':
+          description: No autenticado
+        '500':
+          description: Error del servidor
 tags: []

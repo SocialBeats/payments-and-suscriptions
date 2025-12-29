@@ -19,8 +19,9 @@ const subscriptionSchema = new mongoose.Schema(
     // Identificadores de Stripe
     stripeCustomerId: {
       type: String,
-      required: true,
+      required: false, // No obligatorio para usuarios FREE internos
       unique: true,
+      sparse: true, // Permite nulos/inexistentes sin violar unicidad
       index: true,
     },
     stripeSubscriptionId: {
@@ -34,7 +35,14 @@ const subscriptionSchema = new mongoose.Schema(
     // Estado de la suscripción
     status: {
       type: String,
-      enum: ['active', 'canceled', 'past_due', 'incomplete', 'trialing', 'unpaid'],
+      enum: [
+        'active',
+        'canceled',
+        'past_due',
+        'incomplete',
+        'trialing',
+        'unpaid',
+      ],
       default: 'incomplete',
     },
     // Plan contratado (FREE es interno, BASIC y PREMIUM vienen de SPACE)

@@ -1,8 +1,12 @@
 import express from 'express';
 import * as subscriptionController from '../controllers/subscriptionController.js';
 import verifyToken from '../middlewares/authMiddlewares.js';
-import { webhookMiddleware, verifyStripeSignature } from '../middlewares/webhookMiddleware.js';
+import {
+  webhookMiddleware,
+  verifyStripeSignature,
+} from '../middlewares/webhookMiddleware.js';
 import logger from '../../logger.js';
+import { requireInternalApiKey } from '../middlewares/internalMiddleware.js';
 
 const router = express.Router();
 
@@ -78,7 +82,11 @@ const router = express.Router();
  *       500:
  *         description: Error del servidor
  */
-router.post('/checkout', verifyToken, subscriptionController.createCheckoutSession);
+router.post(
+  '/checkout',
+  verifyToken,
+  subscriptionController.createCheckoutSession
+);
 
 /**
  * @swagger
@@ -122,7 +130,11 @@ router.post('/checkout', verifyToken, subscriptionController.createCheckoutSessi
  *       500:
  *         description: Error del servidor
  */
-router.get('/subscription', verifyToken, subscriptionController.getSubscriptionStatus);
+router.get(
+  '/subscription',
+  verifyToken,
+  subscriptionController.getSubscriptionStatus
+);
 
 /**
  * @swagger
@@ -152,7 +164,11 @@ router.get('/subscription', verifyToken, subscriptionController.getSubscriptionS
  *       500:
  *         description: Error del servidor
  */
-router.delete('/subscription', verifyToken, subscriptionController.cancelSubscription);
+router.delete(
+  '/subscription',
+  verifyToken,
+  subscriptionController.cancelSubscription
+);
 
 /**
  * @swagger
@@ -170,5 +186,69 @@ router.delete('/subscription', verifyToken, subscriptionController.cancelSubscri
 // Nota: La ruta webhook NO usa authMiddleware y debe montarse con webhookMiddleware en main.js
 
 logger.info('✅ Subscription routes configured');
+
+/**
+ * @swagger
+ * /api/v1/payments/internal/free-contract:
+ *   post:
+ *     summary: Crear un contrato de suscripción gratuito
+ *     tags: [Payments]
+ *     security:
+ *       - internalAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - userId
+ *               - username
+ *               - plan
+ *             properties:
+ *               userId:
+ *                 type: string
+ *                 description: ID del usuario
+ *               username:
+ *                 type: string
+ *                 description: Nombre de usuario
+ *               plan:
+ *                 type: string
+ *                 enum: [BASIC, PREMIUM]
+ *                 description: Tipo de plan a contratar
+ *     responses:
+ *       200:
+ *         description: Contrato creado exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                 contract:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                     userId:
+ *                       type: string
+ *                     username:
+ *                       type: string
+ *                     plan:
+ *                       type: string
+ *       400:
+ *         description: Datos inválidos
+ *       401:
+ *         description: No autenticado
+ *       500:
+ *         description: Error del servidor
+ */
+
+router.post(
+  '/internal/free-contract',
+  requireInternalApiKey,
+  subscriptionController.createFreeContract
+);
 
 export default router;

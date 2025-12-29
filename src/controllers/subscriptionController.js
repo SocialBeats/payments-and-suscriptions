@@ -42,13 +42,18 @@ export const createCheckoutSession = async (req, res) => {
       });
     }
 
-    logger.info(`Creating checkout session for user ${userId} with plan: ${planType}`);
+    logger.info(
+      `Creating checkout session for user ${userId} with plan: ${planType}`
+    );
 
     // Obtener o crear customer de Stripe
-    const customer = await stripeService.getOrCreateCustomer(email || `${username}@temp.com`, {
-      userId,
-      username,
-    });
+    const customer = await stripeService.getOrCreateCustomer(
+      email || `${username}@temp.com`,
+      {
+        userId,
+        username,
+      }
+    );
 
     // Verificar si ya existe una suscripción activa
     const existingSubscription = await Subscription.findOne({
@@ -165,11 +170,14 @@ export const getSubscriptionStatus = async (req, res) => {
           subscription.currentPeriodEnd = new Date(
             stripeSubscription.current_period_end * 1000
           );
-          subscription.cancelAtPeriodEnd = stripeSubscription.cancel_at_period_end;
+          subscription.cancelAtPeriodEnd =
+            stripeSubscription.cancel_at_period_end;
           await subscription.save();
         }
       } catch (error) {
-        logger.warn(`Failed to fetch Stripe subscription details: ${error.message}`);
+        logger.warn(
+          `Failed to fetch Stripe subscription details: ${error.message}`
+        );
         // Continuar con datos locales
       }
     }
@@ -190,6 +198,60 @@ export const getSubscriptionStatus = async (req, res) => {
     res.status(500).json({
       error: 'SUBSCRIPTION_STATUS_ERROR',
       message: 'Failed to retrieve subscription status',
+      details: error.message,
+    });
+  }
+};
+
+/**
+ * Crear una suscripción del plan básico usando el spaceService, en el cuerpo de la petición se pasarán
+ * userId, username y plan.
+ * Además, crea el registro local de Subscription y el cliente en Stripe.
+ */
+export const createFreeContract = async (req, res) => {
+  try {
+    const { userId, username, plan } = req.body;
+
+    if (!userId || !username || !plan) {
+      return res.status(400).json({
+        error: 'MISSING_REQUIRED_FIELDS',
+        message: 'Missing required fields in request',
+      });
+    }
+
+    // 1. Crear contrato en SPACE
+    const contract = await spaceService.createSpaceContract({
+      userId,
+      username,
+      plan,
+    });
+
+    // 2. Crear/Actualizar suscripción local en MongoDB
+    // Para el plan BASIC (gratuito), lo marcamos como activo directamente.
+    // No creamos Customer en Stripe todavía (se creará si decide pagar en el futuro).
+    const subscription = await Subscription.findOneAndUpdate(
+      { userId },
+      {
+        userId,
+        username,
+        // email: idealmente lo tendríamos, pero no es crítico para free
+        planType: plan, // 'BASIC'
+        status: 'active',
+        // stripeCustomerId: se generará solo cuando vaya a pagar
+      },
+      { upsert: true, new: true }
+    );
+
+    res.status(200).json({
+      message: 'Contract and local subscription created successfully',
+      contract,
+      subscription,
+    });
+  } catch (error) {
+    logger.error(`Error creating contract: ${error.message}`);
+    res.status(500).json({
+      error: 'CONTRACT_ERROR',
+      message: 'Failed to create contract',
       details: error.message,
     });
   }
@@ -222,7 +284,9 @@ export const cancelSubscription = async (req, res) => {
       });
     }
 
-    logger.info(`Canceling subscription for user ${userId}, immediate: ${immediate}`);
+    logger.info(
+      `Canceling subscription for user ${userId}, immediate: ${immediate}`
+    );
 
     // Cancelar en Stripe
     let stripeSubscription;
@@ -239,7 +303,8 @@ export const cancelSubscription = async (req, res) => {
 
     // Actualizar en base de datos local
     subscription.status = stripeSubscription.status;
-    subscription.cancelAtPeriodEnd = stripeSubscription.cancel_at_period_end || immediate;
+    subscription.cancelAtPeriodEnd =
+      stripeSubscription.cancel_at_period_end || immediate;
     subscription.canceledAt = new Date();
     await subscription.save();
 
@@ -284,17 +349,22 @@ export const handleWebhook = async (req, res) => {
   try {
     const signature = req.headers['stripe-signature'];
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-    const isDummySecret = !webhookSecret || webhookSecret === 'whsec_your_webhook_secret_here';
-    
+    const isDummySecret =
+      !webhookSecret || webhookSecret === 'whsec_your_webhook_secret_here';
+
     let event;
 
     // En desarrollo con secreto dummy, permitir webhooks sin firma
     if (!signature && isDummySecret && process.env.NODE_ENV !== 'production') {
-      logger.warn('⚠️  Processing webhook without signature (development mode)');
+      logger.warn(
+        '⚠️  Processing webhook without signature (development mode)'
+      );
       // Parsear directamente el body - puede ser Buffer o string
-      const bodyString = Buffer.isBuffer(req.body) ? req.body.toString() : 
-                         typeof req.body === 'string' ? req.body : 
-                         JSON.stringify(req.body);
+      const bodyString = Buffer.isBuffer(req.body)
+        ? req.body.toString()
+        : typeof req.body === 'string'
+          ? req.body
+          : JSON.stringify(req.body);
       event = JSON.parse(bodyString);
     } else if (!signature) {
       logger.error('Missing stripe-signature header');
@@ -361,8 +431,9 @@ const handleCheckoutCompleted = async (session) => {
     }
 
     // subscription puede ser un ID (string) o un objeto expandido
-    const subscriptionId = typeof subscription === 'string' ? subscription : subscription?.id;
-    
+    const subscriptionId =
+      typeof subscription === 'string' ? subscription : subscription?.id;
+
     logger.info(
       `Checkout completed for user ${metadata.userId}, subscription: ${subscriptionId}`
     );
@@ -375,7 +446,7 @@ const handleCheckoutCompleted = async (session) => {
       // Si no, obtenerla de Stripe
       stripeSubscription = await stripeService.getSubscription(subscriptionId);
     }
-    
+
     const priceId = stripeSubscription.items.data[0]?.price.id;
     const planType = stripeService.getPlanTypeFromPriceId(priceId);
 
@@ -391,12 +462,14 @@ const handleCheckoutCompleted = async (session) => {
 
     // Solo agregar fechas si existen y son válidas
     if (stripeSubscription.current_period_start) {
-      const startDate = new Date(stripeSubscription.current_period_start * 1000);
+      const startDate = new Date(
+        stripeSubscription.current_period_start * 1000
+      );
       if (!isNaN(startDate.getTime())) {
         updateData.currentPeriodStart = startDate;
       }
     }
-    
+
     if (stripeSubscription.current_period_end) {
       const endDate = new Date(stripeSubscription.current_period_end * 1000);
       if (!isNaN(endDate.getTime())) {
@@ -458,7 +531,9 @@ const handleSubscriptionUpdated = async (stripeSubscription) => {
     subscription.currentPeriodStart = new Date(
       stripeSubscription.current_period_start * 1000
     );
-    subscription.currentPeriodEnd = new Date(stripeSubscription.current_period_end * 1000);
+    subscription.currentPeriodEnd = new Date(
+      stripeSubscription.current_period_end * 1000
+    );
     subscription.cancelAtPeriodEnd = stripeSubscription.cancel_at_period_end;
 
     await subscription.save();
@@ -489,10 +564,14 @@ const handleSubscriptionDeleted = async (stripeSubscription) => {
   try {
     const { id } = stripeSubscription;
 
-    const subscription = await Subscription.findOne({ stripeSubscriptionId: id });
+    const subscription = await Subscription.findOne({
+      stripeSubscriptionId: id,
+    });
 
     if (!subscription) {
-      logger.warn(`Subscription not found for deleted Stripe subscription: ${id}`);
+      logger.warn(
+        `Subscription not found for deleted Stripe subscription: ${id}`
+      );
       return;
     }
 
@@ -525,7 +604,9 @@ const handlePaymentSucceeded = async (invoice) => {
       return; // No es pago de suscripción
     }
 
-    const subscription = await Subscription.findOne({ stripeSubscriptionId: subscriptionId });
+    const subscription = await Subscription.findOne({
+      stripeSubscriptionId: subscriptionId,
+    });
 
     if (!subscription) {
       return;
@@ -555,7 +636,9 @@ const handlePaymentFailed = async (invoice) => {
       return;
     }
 
-    const subscription = await Subscription.findOne({ stripeSubscriptionId: subscriptionId });
+    const subscription = await Subscription.findOne({
+      stripeSubscriptionId: subscriptionId,
+    });
 
     if (!subscription) {
       return;
