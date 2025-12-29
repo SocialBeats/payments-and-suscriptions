@@ -14,8 +14,11 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder'
 // Exportar cliente de Stripe para uso directo cuando sea necesario
 export { stripe };
 
-// Mapeo de planes a Price IDs de Stripe
-// Alineado con planes de SPACE: BASIC (€0) y PREMIUM (€10/mes)
+// Importar configuración centralizada de planes
+import { getStripePriceId, getPlanNameFromPriceId } from '../config/plans.config.js';
+
+// DEPRECATED: Usar plans.config.js en su lugar
+// Mantenido temporalmente para compatibilidad
 const PRICE_IDS = {
   BASIC: process.env.STRIPE_PRICE_BASIC,
   PREMIUM: process.env.STRIPE_PRICE_PREMIUM,
@@ -326,12 +329,13 @@ export const verifyWebhookSignature = (payload, signature) => {
 
 /**
  * Obtener el Price ID según el tipo de plan
+ * Usa la configuración centralizada de plans.config.js
  *
- * @param {string} planType - Tipo de plan (BASIC, PRO, PREMIUM)
+ * @param {string} planType - Tipo de plan (BASIC, PREMIUM, etc.)
  * @returns {string} Price ID de Stripe
  */
 export const getPriceIdForPlan = (planType) => {
-  const priceId = PRICE_IDS[planType];
+  const priceId = getStripePriceId(planType);
 
   if (!priceId) {
     throw new Error(`Price ID not configured for plan: ${planType}`);
@@ -342,17 +346,14 @@ export const getPriceIdForPlan = (planType) => {
 
 /**
  * Obtener el tipo de plan basado en el Price ID
+ * Usa la configuración centralizada de plans.config.js
  *
  * @param {string} priceId - Price ID de Stripe
  * @returns {string} Tipo de plan
  */
 export const getPlanTypeFromPriceId = (priceId) => {
-  for (const [planType, id] of Object.entries(PRICE_IDS)) {
-    if (id === priceId) {
-      return planType;
-    }
-  }
-  return 'FREE'; // Default si no se encuentra
+  const planName = getPlanNameFromPriceId(priceId);
+  return planName || 'BASIC'; // Default al plan gratuito si no se encuentra
 };
 
 /**

@@ -2,6 +2,7 @@ import Subscription from '../models/Subscription.js';
 import * as stripeService from '../services/stripeService.js';
 import * as spaceService from '../services/spaceService.js';
 import logger from '../../logger.js';
+import { getValidPlans, comparePlans } from '../config/plans.config.js';
 
 /**
  * Crear una sesión de checkout de Stripe
@@ -22,7 +23,7 @@ export const createCheckoutSession = async (req, res) => {
     }
 
     // Validar plan válido (según configuración de SPACE)
-    const validPlans = ['BASIC', 'PREMIUM'];
+    const validPlans = getValidPlans();
     if (!validPlans.includes(planType)) {
       return res.status(400).json({
         error: 'INVALID_PLAN_TYPE',
@@ -330,7 +331,7 @@ export const updateSubscriptionPlan = async (req, res) => {
     }
 
     // Validar plan válido
-    const validPlans = ['BASIC', 'PREMIUM'];
+    const validPlans = getValidPlans();
     if (!validPlans.includes(planType)) {
       return res.status(400).json({
         error: 'INVALID_PLAN_TYPE',
@@ -385,11 +386,11 @@ export const updateSubscriptionPlan = async (req, res) => {
     // Obtener el nuevo Price ID
     const newPriceId = stripeService.getPriceIdForPlan(planType);
 
-    // Determinar si es upgrade o downgrade (comparar precios)
-    const planPrices = { BASIC: 0, PREMIUM: 10 };
-    const currentPrice = planPrices[subscription.planType] || 0;
-    const newPrice = planPrices[planType] || 0;
-    const isUpgrade = newPrice > currentPrice;
+    // Determinar si es upgrade o downgrade (usar configuración centralizada)
+    const { isUpgrade, currentPrice, newPrice } = comparePlans(
+      subscription.planType,
+      planType
+    );
 
     // Si es upgrade a plan de pago, verificar que tenga método de pago
     if (isUpgrade && newPrice > 0) {
