@@ -8,13 +8,14 @@ const openPaths = [
   '/api/v1/changelog',
   '/api/v1/version',
   '/api/v1/payments/webhook', // Webhook de Stripe debe ser público
+  '/api/v1/payments/internal', // Ruta interna protegida por API Key, no JWT
 ];
 
 /**
  * Middleware de autenticación con soporte dual:
  * 1. Headers del API Gateway (producción)
  * 2. JWT directo (Swagger/testing)
- * 
+ *
  * Headers del API Gateway:
  * - x-gateway-authenticated: 'true' si el token es válido
  * - x-user-id: ID del usuario
@@ -59,7 +60,9 @@ const verifyToken = (req, res, next) => {
   // Opción 2: Verificar JWT directo (para Swagger/testing)
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    logger.warn(`Unauthenticated request to ${req.path} - No authentication found`);
+    logger.warn(
+      `Unauthenticated request to ${req.path} - No authentication found`
+    );
     return res.status(401).json({
       error: 'AUTHENTICATION_REQUIRED',
       message: 'Authentication required. Provide JWT token or use API Gateway.',
@@ -67,10 +70,10 @@ const verifyToken = (req, res, next) => {
   }
 
   const token = authHeader.split(' ')[1];
-  
+
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
+
     // Construir objeto user desde JWT
     req.user = {
       id: decoded.id || decoded.userId,
@@ -79,18 +82,20 @@ const verifyToken = (req, res, next) => {
       pricingPlan: decoded.pricingPlan || 'FREE',
     };
 
-    logger.debug(`User authenticated via JWT: ${req.user.id} (${req.user.username})`);
+    logger.debug(
+      `User authenticated via JWT: ${req.user.id} (${req.user.username})`
+    );
     next();
   } catch (error) {
     logger.warn(`JWT verification failed: ${error.message}`);
-    
+
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({
         error: 'TOKEN_EXPIRED',
         message: 'Token expired. Please login again.',
       });
     }
-    
+
     return res.status(403).json({
       error: 'INVALID_TOKEN',
       message: 'Invalid or malformed token.',

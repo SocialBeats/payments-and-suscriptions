@@ -1,5 +1,42 @@
 import mongoose from 'mongoose';
 
+/**
+ * Modelo de Suscripción
+ *
+ * FLUJO DE SUSCRIPCIONES:
+ * ========================
+ *
+ * 1. USUARIO NUEVO (Plan FREE):
+ *    - Se crea automáticamente un plan FREE en SPACE al registrarse
+ *    - OPCIÓN A: Crear suscripción en Stripe con precio €0 (sin checkout, sin tarjeta)
+ *    - OPCIÓN B: No crear nada en Stripe hasta que haga upgrade
+ *    - En DB: Guardar registro con planType='FREE', status='active', stripeSubscriptionId=null
+ *
+ * 2. UPGRADE (FREE → BASIC/PREMIUM):
+ *    - Si NO tiene suscripción en Stripe: Crear checkout y nueva suscripción
+ *    - Si SÍ tiene suscripción: Actualizar con stripe.subscriptions.update()
+ *    - Stripe maneja prorrateo automático (cobra diferencia inmediata)
+ *    - Actualizar en DB y sincronizar con SPACE
+ *
+ * 3. DOWNGRADE (PREMIUM → BASIC o → FREE):
+ *    - Actualizar suscripción con stripe.subscriptions.update()
+ *    - Stripe crea crédito prorrateado para siguiente periodo
+ *    - Actualizar en DB y sincronizar con SPACE
+ *    - Si baja a FREE, considerar cancelar suscripción en Stripe
+ *
+ * 4. CAMBIO LATERAL (BASIC ↔ PREMIUM):
+ *    - Actualizar con stripe.subscriptions.update()
+ *    - Prorrateo según diferencia de precio
+ *
+ * ESTADOS EN STRIPE:
+ * - 'active': Suscripción activa y pagada
+ * - 'trialing': En periodo de prueba
+ * - 'past_due': Pago fallido, reintentando
+ * - 'incomplete': Checkout iniciado pero no completado
+ * - 'canceled': Cancelada
+ * - 'unpaid': Pago fallido definitivamente
+ */
+
 const subscriptionSchema = new mongoose.Schema(
   {
     // Referencia simple al usuario (string, no ObjectId para evitar relación entre microservicios)
@@ -19,8 +56,9 @@ const subscriptionSchema = new mongoose.Schema(
     // Identificadores de Stripe
     stripeCustomerId: {
       type: String,
-      required: true,
+      required: false, // No obligatorio para usuarios FREE internos
       unique: true,
+      sparse: true, // Permite nulos/inexistentes sin violar unicidad
       index: true,
     },
     stripeSubscriptionId: {
@@ -34,7 +72,14 @@ const subscriptionSchema = new mongoose.Schema(
     // Estado de la suscripción
     status: {
       type: String,
-      enum: ['active', 'canceled', 'past_due', 'incomplete', 'trialing', 'unpaid'],
+      enum: [
+        'active',
+        'canceled',
+        'past_due',
+        'incomplete',
+        'trialing',
+        'unpaid',
+      ],
       default: 'incomplete',
     },
     // Plan contratado (FREE es interno, BASIC y PREMIUM vienen de SPACE)
