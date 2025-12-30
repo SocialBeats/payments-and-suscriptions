@@ -21,17 +21,19 @@ export const webhookMiddleware = express.raw({
 /**
  * Middleware para verificar que el request viene de Stripe
  * (verifica que tenga el header stripe-signature)
- * 
+ *
  * En desarrollo con secreto dummy, permite webhooks sin firma para testing manual
  */
 export const verifyStripeSignature = (req, res, next) => {
   const signature = req.headers['stripe-signature'];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-  const isDummySecret = !webhookSecret || webhookSecret === 'whsec_your_webhook_secret_here';
+  const isDummySecret =
+    !webhookSecret || webhookSecret === 'whsec_your_webhook_secret_here';
 
   // Permitir webhooks sin firma en desarrollo con secreto dummy
   if (!signature && isDummySecret && process.env.NODE_ENV !== 'production') {
-    logger.warn('⚠️  Webhook without signature accepted (development mode with dummy secret)');
+    logger.warn(
+      '⚠️  Webhook without signature accepted (development mode with dummy secret)'
+    );
     return next();
   }
 

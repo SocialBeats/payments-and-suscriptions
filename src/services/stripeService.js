@@ -3,19 +3,27 @@ import logger from '../../logger.js';
 
 // Validación crítica en producción
 if (process.env.NODE_ENV === 'production' && !process.env.STRIPE_SECRET_KEY) {
-  throw new Error('FATAL: STRIPE_SECRET_KEY is not defined in production environment');
+  throw new Error(
+    'FATAL: STRIPE_SECRET_KEY is not defined in production environment'
+  );
 }
 
 // Inicializar cliente de Stripe
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder', {
-  apiVersion: '2024-12-18.acacia', // Usar última versión estable
-});
+const stripe = new Stripe(
+  process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder',
+  {
+    apiVersion: '2024-12-18.acacia', // Usar última versión estable
+  }
+);
 
 // Exportar cliente de Stripe para uso directo cuando sea necesario
 export { stripe };
 
 // Importar configuración centralizada de planes
-import { getStripePriceId, getPlanNameFromPriceId } from '../config/plans.config.js';
+import {
+  getStripePriceId,
+  getPlanNameFromPriceId,
+} from '../config/plans.config.js';
 
 // DEPRECATED: Usar plans.config.js en su lugar
 // Mantenido temporalmente para compatibilidad
@@ -35,16 +43,19 @@ export const customerHasPaymentMethod = async (customerId) => {
     const customer = await stripe.customers.retrieve(customerId, {
       expand: ['default_source', 'invoice_settings.default_payment_method'],
     });
-    
+
     logger.info(`Checking payment method for customer ${customerId}`);
     logger.info(`- default_payment_method: ${customer.default_payment_method}`);
-    logger.info(`- invoice_settings.default_payment_method: ${customer.invoice_settings?.default_payment_method}`);
+    logger.info(
+      `- invoice_settings.default_payment_method: ${customer.invoice_settings?.default_payment_method}`
+    );
     logger.info(`- default_source: ${customer.default_source}`);
-    
+
     // Verificar si tiene default_payment_method o invoice_settings.default_payment_method
-    const hasDefaultPaymentMethod = customer.default_payment_method || 
-                                    customer.invoice_settings?.default_payment_method;
-    
+    const hasDefaultPaymentMethod =
+      customer.default_payment_method ||
+      customer.invoice_settings?.default_payment_method;
+
     if (hasDefaultPaymentMethod) {
       logger.info(`✅ Customer ${customerId} has default payment method`);
       return true;
@@ -64,16 +75,20 @@ export const customerHasPaymentMethod = async (customerId) => {
     });
 
     const hasPaymentMethods = paymentMethods.data.length > 0;
-    
+
     if (hasPaymentMethods) {
-      logger.info(`✅ Customer ${customerId} has ${paymentMethods.data.length} payment method(s)`);
+      logger.info(
+        `✅ Customer ${customerId} has ${paymentMethods.data.length} payment method(s)`
+      );
       return true;
     }
-    
+
     logger.warn(`❌ Customer ${customerId} has NO payment methods`);
     return false;
   } catch (error) {
-    logger.error(`Error checking payment method for customer ${customerId}: ${error.message}`);
+    logger.error(
+      `Error checking payment method for customer ${customerId}: ${error.message}`
+    );
     // En caso de error, asumimos que NO tiene método de pago (fail-safe)
     return false;
   }
@@ -106,7 +121,9 @@ export const createSetupSession = async ({
       metadata,
     });
 
-    logger.info(`Setup session created: ${session.id} for customer: ${customerId}`);
+    logger.info(
+      `Setup session created: ${session.id} for customer: ${customerId}`
+    );
     return session;
   } catch (error) {
     logger.error(`Error creating setup session: ${error.message}`);
@@ -142,8 +159,10 @@ export const getSetupSession = async (sessionId) => {
  */
 export const setDefaultPaymentMethod = async (customerId, paymentMethodId) => {
   try {
-    logger.info(`Setting payment method ${paymentMethodId} as default for customer ${customerId}`);
-    
+    logger.info(
+      `Setting payment method ${paymentMethodId} as default for customer ${customerId}`
+    );
+
     const customer = await stripe.customers.update(customerId, {
       invoice_settings: {
         default_payment_method: paymentMethodId,
@@ -231,7 +250,9 @@ export const createCheckoutSession = async ({
       billing_address_collection: 'auto',
     });
 
-    logger.info(`Checkout session created: ${session.id} for customer: ${customerId}`);
+    logger.info(
+      `Checkout session created: ${session.id} for customer: ${customerId}`
+    );
     return session;
   } catch (error) {
     logger.error(`Error creating checkout session: ${error.message}`);
@@ -263,7 +284,10 @@ export const getSubscription = async (subscriptionId) => {
  * @param {boolean} atPeriodEnd - Si cancelar al final del periodo o inmediatamente
  * @returns {Promise<Object>} Suscripción cancelada
  */
-export const cancelSubscription = async (subscriptionId, atPeriodEnd = true) => {
+export const cancelSubscription = async (
+  subscriptionId,
+  atPeriodEnd = true
+) => {
   try {
     const subscription = await stripe.subscriptions.update(subscriptionId, {
       cancel_at_period_end: atPeriodEnd,
@@ -305,20 +329,27 @@ export const cancelSubscriptionImmediately = async (subscriptionId) => {
  */
 export const verifyWebhookSignature = (payload, signature) => {
   try {
-    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
     // En desarrollo, permitir webhooks sin verificación si no hay secret configurado
-    if (!webhookSecret || webhookSecret.includes('your_webhook_secret_here') || webhookSecret.includes('dummy')) {
-      logger.warn('⚠️  Webhook signature verification DISABLED (development mode)');
-      logger.warn('⚠️  In production, configure STRIPE_WEBHOOK_SECRET properly!');
-      
+    if (
+      !webhookSecret ||
+      webhookSecret.includes('your_webhook_secret_here') ||
+      webhookSecret.includes('dummy')
+    ) {
+      logger.warn(
+        '⚠️  Webhook signature verification DISABLED (development mode)'
+      );
+
       // Parsear el payload manualmente sin verificar firma
       const event = JSON.parse(payload.toString());
       logger.info(`Webhook received (unverified): ${event.type}`);
       return event;
     }
 
-    const event = stripe.webhooks.constructEvent(payload, signature, webhookSecret);
+    const event = stripe.webhooks.constructEvent(
+      payload,
+      signature,
+      webhookSecret
+    );
     logger.info(`✅ Webhook signature verified for event: ${event.type}`);
     return event;
   } catch (error) {
@@ -366,7 +397,11 @@ export const getPlanTypeFromPriceId = (priceId) => {
  * @param {Object} params.metadata - Metadata adicional
  * @returns {Promise<Object>} Suscripción creada
  */
-export const createFreeSubscription = async ({ customerId, priceId, metadata = {} }) => {
+export const createFreeSubscription = async ({
+  customerId,
+  priceId,
+  metadata = {},
+}) => {
   try {
     const subscription = await stripe.subscriptions.create({
       customer: customerId,
@@ -375,7 +410,9 @@ export const createFreeSubscription = async ({ customerId, priceId, metadata = {
       // No requiere payment_method porque el precio es €0
     });
 
-    logger.info(`Free subscription created: ${subscription.id} for customer: ${customerId}`);
+    logger.info(
+      `Free subscription created: ${subscription.id} for customer: ${customerId}`
+    );
     return subscription;
   } catch (error) {
     logger.error(`Error creating free subscription: ${error.message}`);
@@ -403,7 +440,8 @@ export const updateSubscriptionPlan = async ({
 }) => {
   try {
     // Obtener la suscripción actual
-    const currentSubscription = await stripe.subscriptions.retrieve(subscriptionId);
+    const currentSubscription =
+      await stripe.subscriptions.retrieve(subscriptionId);
 
     if (!currentSubscription || !currentSubscription.items.data[0]) {
       throw new Error('Invalid subscription or subscription items');
@@ -415,7 +453,9 @@ export const updateSubscriptionPlan = async ({
 
     // Si el precio es el mismo, no hacer nada
     if (currentPriceId === newPriceId) {
-      logger.info(`Subscription ${subscriptionId} already has price ${newPriceId}`);
+      logger.info(
+        `Subscription ${subscriptionId} already has price ${newPriceId}`
+      );
       return currentSubscription;
     }
 
@@ -424,16 +464,19 @@ export const updateSubscriptionPlan = async ({
     );
 
     // Actualizar la suscripción con el nuevo precio
-    const updatedSubscription = await stripe.subscriptions.update(subscriptionId, {
-      items: [
-        {
-          id: subscriptionItemId,
-          price: newPriceId,
-        },
-      ],
-      proration_behavior: prorationBehavior,
-      // billing_cycle_anchor: 'unchanged', // Mantener el ciclo de facturación
-    });
+    const updatedSubscription = await stripe.subscriptions.update(
+      subscriptionId,
+      {
+        items: [
+          {
+            id: subscriptionItemId,
+            price: newPriceId,
+          },
+        ],
+        proration_behavior: prorationBehavior,
+        // billing_cycle_anchor: 'unchanged', // Mantener el ciclo de facturación
+      }
+    );
 
     logger.info(
       `Subscription ${subscriptionId} updated successfully with proration: ${prorationBehavior}`
