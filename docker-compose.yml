@@ -44,3 +44,4 @@ volumes:
 networks:
   socialbeats-network:
     driver: bridge
+    

@@ -54,7 +54,7 @@ async function triggerWebhook() {
       request: { id: null, idempotency_key: null }
     };
 
-    console.log('\n📤 Enviando webhook a localhost:3010...');
+    console.log('\n📤 Enviando webhook a localhost:3000...');
 
     // Llamar al webhook local
     const response = await fetch('http://localhost:3006/api/v1/payments/webhook', {

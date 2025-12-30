@@ -4,6 +4,7 @@ import logger from '../../logger.js';
 // Validación de configuración de SPACE
 const SPACE_URL = process.env.SPACE_URL || 'http://localhost:5403';
 const SPACE_API_KEY = process.env.SPACE_API_KEY || 'default-key';
+const SPACE_SERVICE_NAME = process.env.SPACE_SERVICE_NAME || 'news';
 
 if (process.env.NODE_ENV === 'production' && SPACE_API_KEY === 'default-key') {
   logger.warn('WARNING: Using default SPACE_API_KEY in production');
@@ -19,7 +20,12 @@ if (process.env.NODE_ENV === 'production' && SPACE_API_KEY === 'default-key') {
  * @param {Object} params.addOns - Add-ons adicionales (opcional)
  * @returns {Promise<void>}
  */
-export const createSpaceContract = async ({ userId, username, plan, addOns = {} }) => {
+export const createSpaceContract = async ({
+  userId,
+  username,
+  plan,
+  addOns = {},
+}) => {
   return new Promise((resolve, reject) => {
     try {
       logger.info(
@@ -34,7 +40,8 @@ export const createSpaceContract = async ({ userId, username, plan, addOns = {} 
       spaceClient.on('synchronized', async () => {
         try {
           // Intentar obtener contrato existente
-          const existingContract = await spaceClient.contracts.getContract(userId);
+          const existingContract =
+            await spaceClient.contracts.getContract(userId);
 
           if (existingContract) {
             logger.info(
@@ -42,32 +49,44 @@ export const createSpaceContract = async ({ userId, username, plan, addOns = {} 
             );
 
             // Actualizar plan existente
-            await spaceClient.contracts.updateContract(userId, {
-              subscriptionPlans: { news: plan },
+            await spaceClient.contracts.updateContractSubscription(userId, {
+              contractedServices: { news: '1.0' },
+              subscriptionPlans: { [SPACE_SERVICE_NAME]: plan },
               subscriptionAddOns: addOns,
             });
 
-            logger.info(`SPACE contract updated successfully for user ${userId}`);
+            logger.info(
+              `SPACE contract updated successfully for user ${userId}`
+            );
             resolve();
           }
         } catch (error) {
           // Si no existe, crear nuevo contrato
-          if (error.message?.includes('not found') || error.response?.status === 404) {
-            logger.info(`No existing contract found. Creating new contract for ${userId}`);
+          if (
+            error.message?.includes('not found') ||
+            error.response?.status === 404
+          ) {
+            logger.info(
+              `No existing contract found. Creating new contract for ${userId}`
+            );
 
             await spaceClient.contracts.addContract({
               userContact: { userId, username },
               billingPeriod: { autoRenew: true, renewalDays: 30 },
-              contractedServices: { news: '1.0' },
-              subscriptionPlans: { news: plan },
+              contractedServices: { [SPACE_SERVICE_NAME]: '1.0' },
+              subscriptionPlans: { [SPACE_SERVICE_NAME]: plan },
               subscriptionAddOns: addOns,
             });
 
-            logger.info(`SPACE contract created successfully for user ${userId}`);
+            logger.info(
+              `SPACE contract created successfully for user ${userId}`
+            );
             resolve();
           } else {
             // Otro tipo de error
-            logger.error(`Error checking/creating SPACE contract: ${error.message}`);
+            logger.error(
+              `Error checking/creating SPACE contract: ${error.message}`
+            );
             reject(error);
           }
         }
@@ -101,7 +120,9 @@ export const createSpaceContract = async ({ userId, username, plan, addOns = {} 
 export const updateSpaceContract = async ({ userId, plan, addOns = {} }) => {
   return new Promise((resolve, reject) => {
     try {
-      logger.info(`Updating SPACE contract for user ${userId} to plan: ${plan}`);
+      logger.info(
+        `Updating SPACE contract for user ${userId} to plan: ${plan}`
+      );
 
       const spaceClient = connect({
         url: SPACE_URL,
@@ -110,8 +131,9 @@ export const updateSpaceContract = async ({ userId, plan, addOns = {} }) => {
 
       spaceClient.on('synchronized', async () => {
         try {
-          await spaceClient.contracts.updateContract(userId, {
-            subscriptionPlans: { news: plan },
+          await spaceClient.contracts.updateContractSubscription(userId, {
+            contractedServices: { news: '1.0' },
+            subscriptionPlans: { [SPACE_SERVICE_NAME]: plan },
             subscriptionAddOns: addOns,
           });
 
@@ -159,12 +181,14 @@ export const cancelSpaceContract = async (userId) => {
         try {
           // Downgrade a FREE o marcar como inactivo
           await spaceClient.contracts.updateContractSubscription(userId, {
-            contractedServices: { news: '1.0' },
-            subscriptionPlans: { news: 'BASIC' },
+            contractedServices: { [SPACE_SERVICE_NAME]: '1.0' },
+            subscriptionPlans: { [SPACE_SERVICE_NAME]: 'BASIC' },
             subscriptionAddOns: {},
           });
 
-          logger.info(`SPACE contract canceled (downgraded to FREE) for user ${userId}`);
+          logger.info(
+            `SPACE contract canceled (downgraded to FREE) for user ${userId}`
+          );
           resolve();
         } catch (error) {
           logger.error(`Error canceling SPACE contract: ${error.message}`);
@@ -215,15 +239,21 @@ export const deleteSpaceContract = async (userId) => {
 
     // Si el contrato no existe (404), no es un error crítico
     if (response.status === 404) {
-      logger.info(`SPACE contract not found for user ${userId}, already deleted`);
+      logger.info(
+        `SPACE contract not found for user ${userId}, already deleted`
+      );
       return;
     }
 
     // Cualquier otro error
     const errorText = await response.text();
-    throw new Error(`Failed to delete SPACE contract: ${response.status} ${errorText}`);
+    throw new Error(
+      `Failed to delete SPACE contract: ${response.status} ${errorText}`
+    );
   } catch (error) {
-    logger.error(`Error deleting SPACE contract for user ${userId}: ${error.message}`);
+    logger.error(
+      `Error deleting SPACE contract for user ${userId}: ${error.message}`
+    );
     throw error;
   }
 };

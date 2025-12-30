@@ -11,11 +11,151 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder'
   apiVersion: '2024-12-18.acacia', // Usar última versión estable
 });
 
-// Mapeo de planes a Price IDs de Stripe
-// Alineado con planes de SPACE: BASIC (€0) y PREMIUM (€10/mes)
+// Exportar cliente de Stripe para uso directo cuando sea necesario
+export { stripe };
+
+// Importar configuración centralizada de planes
+import { getStripePriceId, getPlanNameFromPriceId } from '../config/plans.config.js';
+
+// DEPRECATED: Usar plans.config.js en su lugar
+// Mantenido temporalmente para compatibilidad
 const PRICE_IDS = {
   BASIC: process.env.STRIPE_PRICE_BASIC,
   PREMIUM: process.env.STRIPE_PRICE_PREMIUM,
+};
+
+/**
+ * Verificar si un Customer tiene un método de pago válido
+ *
+ * @param {string} customerId - ID del customer de Stripe
+ * @returns {Promise<boolean>} True si tiene método de pago
+ */
+export const customerHasPaymentMethod = async (customerId) => {
+  try {
+    const customer = await stripe.customers.retrieve(customerId, {
+      expand: ['default_source', 'invoice_settings.default_payment_method'],
+    });
+    
+    logger.info(`Checking payment method for customer ${customerId}`);
+    logger.info(`- default_payment_method: ${customer.default_payment_method}`);
+    logger.info(`- invoice_settings.default_payment_method: ${customer.invoice_settings?.default_payment_method}`);
+    logger.info(`- default_source: ${customer.default_source}`);
+    
+    // Verificar si tiene default_payment_method o invoice_settings.default_payment_method
+    const hasDefaultPaymentMethod = customer.default_payment_method || 
+                                    customer.invoice_settings?.default_payment_method;
+    
+    if (hasDefaultPaymentMethod) {
+      logger.info(`✅ Customer ${customerId} has default payment method`);
+      return true;
+    }
+
+    // Verificar si tiene default_source (tarjeta antigua)
+    if (customer.default_source) {
+      logger.info(`✅ Customer ${customerId} has default source`);
+      return true;
+    }
+
+    // También verificar si tiene payment methods adjuntos
+    const paymentMethods = await stripe.paymentMethods.list({
+      customer: customerId,
+      type: 'card',
+      limit: 1,
+    });
+
+    const hasPaymentMethods = paymentMethods.data.length > 0;
+    
+    if (hasPaymentMethods) {
+      logger.info(`✅ Customer ${customerId} has ${paymentMethods.data.length} payment method(s)`);
+      return true;
+    }
+    
+    logger.warn(`❌ Customer ${customerId} has NO payment methods`);
+    return false;
+  } catch (error) {
+    logger.error(`Error checking payment method for customer ${customerId}: ${error.message}`);
+    // En caso de error, asumimos que NO tiene método de pago (fail-safe)
+    return false;
+  }
+};
+
+/**
+ * Crear una sesión de Setup para añadir método de pago
+ * Sin cargo, solo para recopilar información de tarjeta
+ *
+ * @param {Object} params - Parámetros de la sesión
+ * @param {string} params.customerId - ID del customer de Stripe
+ * @param {string} params.successUrl - URL de redirección en caso de éxito
+ * @param {string} params.cancelUrl - URL de redirección en caso de cancelación
+ * @param {Object} params.metadata - Metadata adicional
+ * @returns {Promise<Object>} Sesión de setup de Stripe
+ */
+export const createSetupSession = async ({
+  customerId,
+  successUrl,
+  cancelUrl,
+  metadata = {},
+}) => {
+  try {
+    const session = await stripe.checkout.sessions.create({
+      customer: customerId,
+      mode: 'setup',
+      payment_method_types: ['card'],
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      metadata,
+    });
+
+    logger.info(`Setup session created: ${session.id} for customer: ${customerId}`);
+    return session;
+  } catch (error) {
+    logger.error(`Error creating setup session: ${error.message}`);
+    throw new Error('Failed to create setup session');
+  }
+};
+
+/**
+ * Obtener detalles de una sesión de setup de Stripe
+ *
+ * @param {string} sessionId - ID de la sesión de setup
+ * @returns {Promise<Object>} Detalles de la sesión
+ */
+export const getSetupSession = async (sessionId) => {
+  try {
+    const session = await stripe.checkout.sessions.retrieve(sessionId, {
+      expand: ['setup_intent', 'setup_intent.payment_method'],
+    });
+    logger.info(`Setup session retrieved: ${sessionId}`);
+    return session;
+  } catch (error) {
+    logger.error(`Error retrieving setup session: ${error.message}`);
+    throw new Error('Failed to retrieve setup session');
+  }
+};
+
+/**
+ * Configurar un payment method como default para un customer
+ *
+ * @param {string} customerId - ID del customer
+ * @param {string} paymentMethodId - ID del payment method
+ * @returns {Promise<Object>} Customer actualizado
+ */
+export const setDefaultPaymentMethod = async (customerId, paymentMethodId) => {
+  try {
+    logger.info(`Setting payment method ${paymentMethodId} as default for customer ${customerId}`);
+    
+    const customer = await stripe.customers.update(customerId, {
+      invoice_settings: {
+        default_payment_method: paymentMethodId,
+      },
+    });
+
+    logger.info(`✅ Default payment method set for customer ${customerId}`);
+    return customer;
+  } catch (error) {
+    logger.error(`Error setting default payment method: ${error.message}`);
+    throw new Error('Failed to set default payment method');
+  }
 };
 
 /**
@@ -189,12 +329,13 @@ export const verifyWebhookSignature = (payload, signature) => {
 
 /**
  * Obtener el Price ID según el tipo de plan
+ * Usa la configuración centralizada de plans.config.js
  *
- * @param {string} planType - Tipo de plan (BASIC, PRO, PREMIUM)
+ * @param {string} planType - Tipo de plan (BASIC, PREMIUM, etc.)
  * @returns {string} Price ID de Stripe
  */
 export const getPriceIdForPlan = (planType) => {
-  const priceId = PRICE_IDS[planType];
+  const priceId = getStripePriceId(planType);
 
   if (!priceId) {
     throw new Error(`Price ID not configured for plan: ${planType}`);
@@ -205,17 +346,103 @@ export const getPriceIdForPlan = (planType) => {
 
 /**
  * Obtener el tipo de plan basado en el Price ID
+ * Usa la configuración centralizada de plans.config.js
  *
  * @param {string} priceId - Price ID de Stripe
  * @returns {string} Tipo de plan
  */
 export const getPlanTypeFromPriceId = (priceId) => {
-  for (const [planType, id] of Object.entries(PRICE_IDS)) {
-    if (id === priceId) {
-      return planType;
-    }
+  const planName = getPlanNameFromPriceId(priceId);
+  return planName || 'BASIC'; // Default al plan gratuito si no se encuentra
+};
+
+/**
+ * Crear una suscripción gratuita directamente (sin checkout)
+ * Para usuarios nuevos con plan FREE
+ *
+ * @param {Object} params - Parámetros de la suscripción
+ * @param {string} params.customerId - ID del customer de Stripe
+ * @param {string} params.priceId - Price ID del plan FREE (debe ser €0)
+ * @param {Object} params.metadata - Metadata adicional
+ * @returns {Promise<Object>} Suscripción creada
+ */
+export const createFreeSubscription = async ({ customerId, priceId, metadata = {} }) => {
+  try {
+    const subscription = await stripe.subscriptions.create({
+      customer: customerId,
+      items: [{ price: priceId }],
+      metadata,
+      // No requiere payment_method porque el precio es €0
+    });
+
+    logger.info(`Free subscription created: ${subscription.id} for customer: ${customerId}`);
+    return subscription;
+  } catch (error) {
+    logger.error(`Error creating free subscription: ${error.message}`);
+    throw new Error('Failed to create free subscription');
   }
-  return 'FREE'; // Default si no se encuentra
+};
+
+/**
+ * Actualizar el plan de una suscripción existente
+ * Maneja upgrades y downgrades con prorrateo automático
+ *
+ * @param {Object} params - Parámetros de actualización
+ * @param {string} params.subscriptionId - ID de la suscripción a actualizar
+ * @param {string} params.newPriceId - Nuevo Price ID
+ * @param {string} params.prorationBehavior - Comportamiento de prorrateo:
+ *   - 'create_prorations' (default): Crea cargos/créditos prorrateados
+ *   - 'none': No prorratear, aplicar cambio al inicio del siguiente periodo
+ *   - 'always_invoice': Siempre crear una factura inmediata
+ * @returns {Promise<Object>} Suscripción actualizada
+ */
+export const updateSubscriptionPlan = async ({
+  subscriptionId,
+  newPriceId,
+  prorationBehavior = 'create_prorations',
+}) => {
+  try {
+    // Obtener la suscripción actual
+    const currentSubscription = await stripe.subscriptions.retrieve(subscriptionId);
+
+    if (!currentSubscription || !currentSubscription.items.data[0]) {
+      throw new Error('Invalid subscription or subscription items');
+    }
+
+    // Obtener el subscription item ID (necesario para actualizar)
+    const subscriptionItemId = currentSubscription.items.data[0].id;
+    const currentPriceId = currentSubscription.items.data[0].price.id;
+
+    // Si el precio es el mismo, no hacer nada
+    if (currentPriceId === newPriceId) {
+      logger.info(`Subscription ${subscriptionId} already has price ${newPriceId}`);
+      return currentSubscription;
+    }
+
+    logger.info(
+      `Updating subscription ${subscriptionId} from ${currentPriceId} to ${newPriceId}`
+    );
+
+    // Actualizar la suscripción con el nuevo precio
+    const updatedSubscription = await stripe.subscriptions.update(subscriptionId, {
+      items: [
+        {
+          id: subscriptionItemId,
+          price: newPriceId,
+        },
+      ],
+      proration_behavior: prorationBehavior,
+      // billing_cycle_anchor: 'unchanged', // Mantener el ciclo de facturación
+    });
+
+    logger.info(
+      `Subscription ${subscriptionId} updated successfully with proration: ${prorationBehavior}`
+    );
+    return updatedSubscription;
+  } catch (error) {
+    logger.error(`Error updating subscription plan: ${error.message}`);
+    throw new Error(`Failed to update subscription plan: ${error.message}`);
+  }
 };
 
 export default stripe;
