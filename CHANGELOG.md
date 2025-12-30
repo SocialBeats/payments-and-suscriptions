@@ -1,3 +1,23 @@
+# Release v0.0.3
+
+## Features
+No new features.
+## Tests
+No test changes.
+## Documentation
+No documentation changes.
+## Fixes
+- fix: delete webhook secret
+
+## Continuous integration (CI)
+No CI changes.
+## Other changes
+- Merge pull request #6 from SocialBeats/develop
+
+## Full commit history
+
+For full commit history, see [here](https://github.com/SocialBeats/payments-and-suscriptions/compare/v0.0.2...v0.0.3).
+
 # Release v0.0.2
 
 ## Features
