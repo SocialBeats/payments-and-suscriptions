@@ -1,19 +1,19 @@
 /**
- * Configuración centralizada de planes de suscripción
+ * Configuración centralizada de planes de suscripción y AddOns
  * Alineado con SPACE pricing YAML - SocialBeats-latest.yaml
- * 
+ *
  * Para actualizar a planes de producción:
  * 1. Actualizar STRIPE_PRICE_* en .env con los nuevos Price IDs
  * 2. Actualizar prices en este archivo si los precios cambian
  * 3. Actualizar features/usageLimits si cambian las características
- * 
+ *
  * @see SocialBeats-latest.yaml para definiciones completas de features y limits
  */
 
 /**
  * Definición de planes disponibles
  * Sincronizado con SocialBeats-latest.yaml
- * 
+ *
  * Planes:
  * - FREE: €0.00/mes - Plan gratuito con funcionalidades básicas
  * - PRO: €9.99/mes - Plan profesional con más límites y features
@@ -124,7 +124,7 @@ export const PLANS = {
     name: 'STUDIO',
     displayName: 'Studio',
     description: 'Most advanced plan',
-    price: 19.99, // EUR
+    price: 29.99, // EUR
     unit: 'user/month',
     stripePriceId: process.env.STRIPE_PRICE_STUDIO,
     features: {
@@ -270,14 +270,190 @@ export const getDefaultFreePlan = () => {
 };
 
 /**
+ * ============================================================================
+ * ADDONS CONFIGURATION
+ * Sincronizado con SocialBeats-latest.yaml
+ * ============================================================================
+ */
+
+/**
+ * Definición de AddOns disponibles
+ *
+ * AddOns:
+ * - decoratives: €0.99/mes - Decorativos para foto de perfil
+ * - promotedBeat: €2.99/mes - Promocionar beats
+ * - privatePlaylists: €2.99/mes - Playlists privadas
+ * - unlockFullBeatFree: €1.49/mes - Desbloquear métricas completas (FREE)
+ * - unlockFullBeatPro: €1.49/mes - Desbloquear métricas Studio (PRO)
+ * - fullStudioMetrics: €19.99/mes - Métricas Studio ilimitadas
+ */
+export const ADDONS = {
+  decoratives: {
+    name: 'decoratives',
+    displayName: 'Decorativos',
+    description: 'Accede a decorativos exclusivos para tu foto de perfil',
+    price: 0.99, // EUR
+    unit: 'user/month',
+    stripePriceId: process.env.STRIPE_PRICE_ADDON_DECORATIVES,
+    availableFor: ['FREE', 'PRO'],
+    icon: '✨',
+    features: {
+      decoratives: true,
+    },
+    usageLimitsExtensions: {},
+  },
+  promotedBeat: {
+    name: 'promotedBeat',
+    displayName: 'Beat Promocionado',
+    description: 'Promociona tus beats para obtener más visibilidad',
+    price: 2.99, // EUR
+    unit: 'user/month',
+    stripePriceId: process.env.STRIPE_PRICE_ADDON_PROMOTED_BEAT,
+    availableFor: ['PRO', 'STUDIO'],
+    icon: '🚀',
+    features: {
+      promotedBeat: true,
+    },
+    usageLimitsExtensions: {},
+  },
+  unlockFullBeatFree: {
+    name: 'unlockFullBeatFree',
+    displayName: 'Métricas Completas',
+    description: 'Desbloquea todas las métricas para un beat (Plan FREE)',
+    price: 1.49, // EUR
+    unit: 'user/month',
+    stripePriceId: process.env.STRIPE_PRICE_ADDON_UNLOCK_FREE,
+    availableFor: ['FREE'],
+    icon: '📊',
+    features: {},
+    usageLimitsExtensions: {
+      maxProMetrics: 1,
+      maxStudioMetrics: 1,
+    },
+  },
+  unlockFullBeatPro: {
+    name: 'unlockFullBeatPro',
+    displayName: 'Métricas Studio',
+    description: 'Desbloquea métricas Studio para un beat (Plan PRO)',
+    price: 1.49, // EUR
+    unit: 'user/month',
+    stripePriceId: process.env.STRIPE_PRICE_ADDON_UNLOCK_PRO,
+    availableFor: ['PRO'],
+    icon: '📈',
+    features: {},
+    usageLimitsExtensions: {
+      maxStudioMetrics: 1,
+    },
+  },
+  fullStudioMetrics: {
+    name: 'fullStudioMetrics',
+    displayName: 'Studio Metrics Ilimitado',
+    description: 'Desbloquea métricas Studio para todos tus beats para siempre',
+    price: 19.99, // EUR
+    unit: 'user/month',
+    stripePriceId: process.env.STRIPE_PRICE_ADDON_FULL_STUDIO,
+    availableFor: ['FREE', 'PRO'],
+    icon: '👑',
+    features: {},
+    usageLimitsExtensions: {
+      maxStudioMetrics: Infinity,
+    },
+  },
+};
+
+/**
+ * Obtener lista de nombres de AddOns válidos
+ * @returns {string[]} Array de nombres de AddOns
+ */
+export const getValidAddOns = () => {
+  return Object.keys(ADDONS);
+};
+
+/**
+ * Verificar si un AddOn es válido
+ * @param {string} addonName - Nombre del AddOn
+ * @returns {boolean}
+ */
+export const isValidAddOn = (addonName) => {
+  return addonName in ADDONS;
+};
+
+/**
+ * Obtener configuración de un AddOn
+ * @param {string} addonName - Nombre del AddOn
+ * @returns {Object|null} Configuración del AddOn o null si no existe
+ */
+export const getAddOnConfig = (addonName) => {
+  return ADDONS[addonName] || null;
+};
+
+/**
+ * Obtener precio de un AddOn
+ * @param {string} addonName - Nombre del AddOn
+ * @returns {number} Precio en EUR
+ */
+export const getAddOnPrice = (addonName) => {
+  return ADDONS[addonName]?.price || 0;
+};
+
+/**
+ * Obtener Stripe Price ID de un AddOn
+ * @param {string} addonName - Nombre del AddOn
+ * @returns {string|null} Price ID de Stripe
+ */
+export const getAddOnStripePriceId = (addonName) => {
+  return ADDONS[addonName]?.stripePriceId || null;
+};
+
+/**
+ * Verificar si un AddOn está disponible para un plan
+ * @param {string} addonName - Nombre del AddOn
+ * @param {string} planName - Nombre del plan
+ * @returns {boolean}
+ */
+export const isAddOnAvailableForPlan = (addonName, planName) => {
+  const addon = ADDONS[addonName];
+  if (!addon) return false;
+  return addon.availableFor.includes(planName);
+};
+
+/**
+ * Obtener AddOns disponibles para un plan
+ * @param {string} planName - Nombre del plan
+ * @returns {Object[]} Array de configuraciones de AddOns disponibles
+ */
+export const getAddOnsForPlan = (planName) => {
+  return Object.values(ADDONS).filter((addon) =>
+    addon.availableFor.includes(planName)
+  );
+};
+
+/**
+ * Obtener nombre de AddOn desde Price ID
+ * @param {string} priceId - Price ID de Stripe
+ * @returns {string|null} Nombre del AddOn
+ */
+export const getAddOnNameFromPriceId = (priceId) => {
+  for (const [addonName, config] of Object.entries(ADDONS)) {
+    if (config.stripePriceId === priceId) {
+      return addonName;
+    }
+  }
+  return null;
+};
+
+/**
  * Exportar constantes para validación
  */
 export const PLAN_NAMES = getValidPlans();
 export const FREE_PLAN = getDefaultFreePlan();
+export const ADDON_NAMES = getValidAddOns();
 
 export default {
   PLANS,
+  ADDONS,
   PLAN_NAMES,
+  ADDON_NAMES,
   FREE_PLAN,
   getValidPlans,
   isValidPlan,
@@ -288,4 +464,13 @@ export default {
   planRequiresPayment,
   getPlanNameFromPriceId,
   getDefaultFreePlan,
+  // AddOns exports
+  getValidAddOns,
+  isValidAddOn,
+  getAddOnConfig,
+  getAddOnPrice,
+  getAddOnStripePriceId,
+  isAddOnAvailableForPlan,
+  getAddOnsForPlan,
+  getAddOnNameFromPriceId,
 };

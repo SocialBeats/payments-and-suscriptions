@@ -12,6 +12,7 @@ import { webhookMiddleware, verifyStripeSignature } from './src/middlewares/webh
 import aboutRoutes from './src/routes/aboutRoutes.js';
 import healthRoutes from './src/routes/healthRoutes.js';
 import subscriptionRoutes from './src/routes/subscriptionRoutes.js';
+import addOnRoutes from './src/routes/addOnRoutes.js';
 // import controllers
 import * as subscriptionController from './src/controllers/subscriptionController.js';
 // import kafka
@@ -44,6 +45,7 @@ app.use(verifyToken);
 aboutRoutes(app);
 healthRoutes(app);
 app.use('/api/v1/payments', subscriptionRoutes);
+app.use('/api/v1/payments/addons', addOnRoutes);
 
 // Export app for tests. Do not remove this line
 export default app;

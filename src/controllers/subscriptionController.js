@@ -2,7 +2,77 @@ import Subscription from '../models/Subscription.js';
 import * as stripeService from '../services/stripeService.js';
 import * as spaceService from '../services/spaceService.js';
 import logger from '../../logger.js';
-import { getValidPlans, comparePlans, getDefaultFreePlan, FREE_PLAN } from '../config/plans.config.js';
+import { 
+  getValidPlans, 
+  comparePlans, 
+  getDefaultFreePlan, 
+  FREE_PLAN,
+  isAddOnAvailableForPlan,
+  getAddOnConfig,
+} from '../config/plans.config.js';
+
+/**
+ * Formatear AddOns para el formato que espera SPACE
+ * SPACE espera: { socialbeats: { addonName: quantity, ... } }
+ */
+const formatAddOnsForSpace = (addonNames) => {
+  const result = {};
+  for (const name of addonNames) {
+    result[name] = 1;
+  }
+  return result;
+};
+
+/**
+ * Eliminar AddOns incompatibles con el nuevo plan
+ * Elimina de Stripe y actualiza la base de datos
+ * 
+ * @param {Object} subscription - Documento de suscripción de MongoDB
+ * @param {string} newPlanType - Nuevo tipo de plan
+ * @returns {Object} - { removedAddOns: string[], remainingAddOns: string[] }
+ */
+const removeIncompatibleAddOns = async (subscription, newPlanType) => {
+  const removedAddOns = [];
+  const remainingAddOns = [];
+
+  if (!subscription.activeAddOns || subscription.activeAddOns.length === 0) {
+    return { removedAddOns, remainingAddOns };
+  }
+
+  for (const addon of subscription.activeAddOns) {
+    if (addon.status !== 'active') continue;
+
+    // Verificar si el addon es compatible con el nuevo plan
+    if (!isAddOnAvailableForPlan(addon.name, newPlanType)) {
+      logger.info(`AddOn "${addon.name}" not compatible with plan ${newPlanType}, removing...`);
+      
+      // Eliminar de Stripe si tiene subscription item
+      if (addon.stripeSubscriptionItemId) {
+        try {
+          await stripeService.removeSubscriptionItem(addon.stripeSubscriptionItemId);
+          logger.info(`AddOn "${addon.name}" removed from Stripe subscription`);
+        } catch (stripeError) {
+          logger.error(`Failed to remove addon from Stripe: ${stripeError.message}`);
+          // Continuar de todas formas
+        }
+      }
+
+      // Marcar como cancelado en la DB
+      addon.status = 'canceled';
+      removedAddOns.push(addon.name);
+    } else {
+      remainingAddOns.push(addon.name);
+    }
+  }
+
+  // Guardar cambios si hubo addons eliminados
+  if (removedAddOns.length > 0) {
+    await subscription.save();
+    logger.info(`Removed ${removedAddOns.length} incompatible addons: ${removedAddOns.join(', ')}`);
+  }
+
+  return { removedAddOns, remainingAddOns };
+};
 
 /**
  * Crear una sesión de checkout de Stripe
@@ -192,6 +262,9 @@ export const getSubscriptionStatus = async (req, res) => {
         currentPeriodEnd: subscription.currentPeriodEnd,
         cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
         isActive: subscription.isActive(),
+        // Información de cambio de plan pendiente (downgrade programado)
+        pendingPlanChange: subscription.metadata?.pendingPlanChange || null,
+        pendingChangeDate: subscription.metadata?.pendingChangeDate || null,
       },
     });
   } catch (error) {
@@ -545,6 +618,12 @@ export const updateSubscriptionPlan = async (req, res) => {
     if (stripeSubscription && stripeSubscription.status === 'canceled') {
       logger.info(`Stripe subscription is canceled, creating new subscription for user ${userId}`);
       
+      // Gestionar AddOns incompatibles con el nuevo plan
+      const { removedAddOns, remainingAddOns } = await removeIncompatibleAddOns(subscription, planType);
+      if (removedAddOns.length > 0) {
+        logger.info(`Removed ${removedAddOns.length} incompatible addons for new subscription to ${planType}`);
+      }
+      
       // Crear nueva suscripción
       const newSubscription = await stripeService.stripe.subscriptions.create({
         customer: subscription.stripeCustomerId,
@@ -575,9 +654,15 @@ export const updateSubscriptionPlan = async (req, res) => {
 
       logger.info(`New subscription created: ${newSubscription.id}`);
 
-      // Actualizar SPACE
+      // Actualizar SPACE con addons restantes
       try {
-        await spaceService.updateSpaceContract({ userId, plan: planType });
+        await spaceService.updateSpaceContract({ 
+          userId, 
+          plan: planType,
+          addOns: {
+            socialbeats: formatAddOnsForSpace(remainingAddOns),
+          },
+        });
         logger.info(`SPACE contract updated to ${planType}`);
       } catch (error) {
         logger.error(`Failed to update SPACE contract: ${error.message}`);
@@ -591,12 +676,18 @@ export const updateSubscriptionPlan = async (req, res) => {
           currentPeriodStart: subscription.currentPeriodStart,
           currentPeriodEnd: subscription.currentPeriodEnd,
           isActive: newSubscription.status === 'active',
+          activeAddOns: remainingAddOns,
         },
         change: {
           type: 'new_subscription',
           from: subscription.planType,
           to: planType,
         },
+        removedAddOns: removedAddOns.length > 0 ? {
+          count: removedAddOns.length,
+          names: removedAddOns,
+          reason: `These add-ons are not available for the ${planType} plan`,
+        } : undefined,
         proration: {
           behavior: 'none',
           note: 'New subscription created. Full price charged for this billing period.',
@@ -653,6 +744,12 @@ export const updateSubscriptionPlan = async (req, res) => {
 
     // Para upgrades, actualizar inmediatamente en base de datos
 
+    // Gestionar AddOns incompatibles con el nuevo plan
+    const { removedAddOns, remainingAddOns } = await removeIncompatibleAddOns(subscription, planType);
+    if (removedAddOns.length > 0) {
+      logger.info(`Removed ${removedAddOns.length} incompatible addons for plan change to ${planType}`);
+    }
+
     // Actualizar en base de datos
     subscription.planType = planType;
     subscription.stripePriceId = newPriceId;
@@ -667,11 +764,14 @@ export const updateSubscriptionPlan = async (req, res) => {
 
     logger.info(`Subscription plan updated in database for user ${userId}`);
 
-    // Actualizar en SPACE
+    // Actualizar en SPACE (con addons restantes)
     try {
       await spaceService.updateSpaceContract({
         userId,
         plan: planType,
+        addOns: {
+          socialbeats: formatAddOnsForSpace(remainingAddOns),
+        },
       });
       logger.info(`SPACE contract updated to ${planType} for user ${userId}`);
     } catch (error) {
@@ -687,12 +787,18 @@ export const updateSubscriptionPlan = async (req, res) => {
         currentPeriodStart: subscription.currentPeriodStart,
         currentPeriodEnd: subscription.currentPeriodEnd,
         isActive: subscription.isActive(),
+        activeAddOns: remainingAddOns,
       },
       change: {
         type: isUpgrade ? 'upgrade' : 'downgrade',
         from: currentPrice,
         to: newPrice,
       },
+      removedAddOns: removedAddOns.length > 0 ? {
+        count: removedAddOns.length,
+        names: removedAddOns,
+        reason: `These add-ons are not available for the ${planType} plan`,
+      } : undefined,
       proration: {
         behavior: effectiveProrationBehavior,
         note:
@@ -1419,8 +1525,15 @@ const handleScheduleCompleted = async (schedule) => {
       return;
     }
 
-    // Actualizar en DB con el nuevo plan
     const previousPlan = subscription.planType;
+
+    // Gestionar AddOns incompatibles con el nuevo plan (downgrade)
+    const { removedAddOns, remainingAddOns } = await removeIncompatibleAddOns(subscription, planType);
+    if (removedAddOns.length > 0) {
+      logger.info(`Removed ${removedAddOns.length} incompatible addons after downgrade to ${planType}: ${removedAddOns.join(', ')}`);
+    }
+
+    // Actualizar en DB con el nuevo plan
     subscription.planType = planType;
     subscription.stripePriceId = priceId;
     subscription.status = stripeSubscription.status;
@@ -1439,11 +1552,14 @@ const handleScheduleCompleted = async (schedule) => {
 
     logger.info(`Subscription downgrade completed: ${previousPlan} -> ${planType} for user ${subscription.userId}`);
 
-    // Ahora sí actualizar SPACE con el nuevo plan
+    // Actualizar SPACE con el nuevo plan y addons restantes
     try {
       await spaceService.updateSpaceContract({
         userId: subscription.userId,
         plan: planType,
+        addOns: {
+          socialbeats: formatAddOnsForSpace(remainingAddOns),
+        },
       });
       logger.info(`SPACE contract updated to ${planType} for user ${subscription.userId}`);
     } catch (error) {

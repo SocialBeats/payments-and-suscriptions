@@ -553,4 +553,96 @@ export const updateSubscriptionPlan = async ({
   }
 };
 
+// ====================================================================
+// ADDON MANAGEMENT - Subscription Items
+// ====================================================================
+
+/**
+ * Add an AddOn to an existing subscription as a new subscription item
+ * @param {Object} params - Parameters for adding subscription item
+ * @param {string} params.subscriptionId - The Stripe subscription ID
+ * @param {string} params.priceId - The Stripe price ID for the AddOn
+ * @returns {Promise<Object>} The created subscription item
+ */
+export const addSubscriptionItem = async ({ subscriptionId, priceId }) => {
+  try {
+    logger.info(`Adding subscription item with price ${priceId} to subscription ${subscriptionId}`);
+    
+    const subscriptionItem = await stripe.subscriptionItems.create({
+      subscription: subscriptionId,
+      price: priceId,
+      quantity: 1,
+      proration_behavior: 'create_prorations', // Cobrar prorrateo inmediato
+    });
+    
+    logger.info(`Subscription item ${subscriptionItem.id} created successfully`);
+    return subscriptionItem;
+  } catch (error) {
+    logger.error(`Error adding subscription item: ${error.message}`);
+    throw new Error(`Failed to add subscription item: ${error.message}`);
+  }
+};
+
+/**
+ * Remove an AddOn from a subscription by deleting the subscription item
+ * @param {string} subscriptionItemId - The Stripe subscription item ID to delete
+ * @param {Object} options - Additional options
+ * @param {boolean} options.clearUsage - Whether to clear metered usage (default: false)
+ * @param {string} options.prorationBehavior - Proration behavior (default: 'create_prorations')
+ * @returns {Promise<Object>} Confirmation of deletion
+ */
+export const removeSubscriptionItem = async (subscriptionItemId, options = {}) => {
+  try {
+    const { clearUsage = false, prorationBehavior = 'create_prorations' } = options;
+    
+    logger.info(`Removing subscription item ${subscriptionItemId}`);
+    
+    const deletedItem = await stripe.subscriptionItems.del(subscriptionItemId, {
+      clear_usage: clearUsage,
+      proration_behavior: prorationBehavior,
+    });
+    
+    logger.info(`Subscription item ${subscriptionItemId} removed successfully`);
+    return deletedItem;
+  } catch (error) {
+    logger.error(`Error removing subscription item: ${error.message}`);
+    throw new Error(`Failed to remove subscription item: ${error.message}`);
+  }
+};
+
+/**
+ * List all subscription items for a subscription
+ * @param {string} subscriptionId - The Stripe subscription ID
+ * @returns {Promise<Array>} Array of subscription items
+ */
+export const listSubscriptionItems = async (subscriptionId) => {
+  try {
+    logger.info(`Listing subscription items for subscription ${subscriptionId}`);
+    
+    const items = await stripe.subscriptionItems.list({
+      subscription: subscriptionId,
+    });
+    
+    return items.data;
+  } catch (error) {
+    logger.error(`Error listing subscription items: ${error.message}`);
+    throw new Error(`Failed to list subscription items: ${error.message}`);
+  }
+};
+
+/**
+ * Get a specific subscription item by ID
+ * @param {string} subscriptionItemId - The Stripe subscription item ID
+ * @returns {Promise<Object>} The subscription item
+ */
+export const getSubscriptionItem = async (subscriptionItemId) => {
+  try {
+    const item = await stripe.subscriptionItems.retrieve(subscriptionItemId);
+    return item;
+  } catch (error) {
+    logger.error(`Error retrieving subscription item: ${error.message}`);
+    throw new Error(`Failed to retrieve subscription item: ${error.message}`);
+  }
+};
+
 export default stripe;
