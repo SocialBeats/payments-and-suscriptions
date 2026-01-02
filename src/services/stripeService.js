@@ -26,10 +26,12 @@ import {
 } from '../config/plans.config.js';
 
 // DEPRECATED: Usar plans.config.js en su lugar
-// Mantenido temporalmente para compatibilidad
+// Mantenido temporalmente para compatibilidad con código legacy
+// Los nuevos planes son: FREE, PRO, STUDIO
 const PRICE_IDS = {
-  BASIC: process.env.STRIPE_PRICE_BASIC,
-  PREMIUM: process.env.STRIPE_PRICE_PREMIUM,
+  FREE: process.env.STRIPE_PRICE_FREE,
+  PRO: process.env.STRIPE_PRICE_PRO,
+  STUDIO: process.env.STRIPE_PRICE_STUDIO,
 };
 
 /**
@@ -422,21 +424,25 @@ export const createFreeSubscription = async ({
 
 /**
  * Actualizar el plan de una suscripción existente
- * Maneja upgrades y downgrades con prorrateo automático
+ * Maneja upgrades y downgrades con comportamiento diferenciado:
+ * - UPGRADE: Cobro prorrateado inmediato, acceso inmediato al nuevo plan
+ * - DOWNGRADE: Mantiene plan actual hasta fin de periodo, luego cambia
  *
  * @param {Object} params - Parámetros de actualización
  * @param {string} params.subscriptionId - ID de la suscripción a actualizar
  * @param {string} params.newPriceId - Nuevo Price ID
  * @param {string} params.prorationBehavior - Comportamiento de prorrateo:
- *   - 'create_prorations' (default): Crea cargos/créditos prorrateados
+ *   - 'create_prorations' (default): Crea cargos/créditos prorrateados (para upgrades)
  *   - 'none': No prorratear, aplicar cambio al inicio del siguiente periodo
  *   - 'always_invoice': Siempre crear una factura inmediata
+ * @param {boolean} params.isDowngrade - Si es un downgrade (cambio diferido)
  * @returns {Promise<Object>} Suscripción actualizada
  */
 export const updateSubscriptionPlan = async ({
   subscriptionId,
   newPriceId,
   prorationBehavior = 'create_prorations',
+  isDowngrade = false,
 }) => {
   try {
     // Obtener la suscripción actual
@@ -460,10 +466,68 @@ export const updateSubscriptionPlan = async ({
     }
 
     logger.info(
-      `Updating subscription ${subscriptionId} from ${currentPriceId} to ${newPriceId}`
+      `Updating subscription ${subscriptionId} from ${currentPriceId} to ${newPriceId} (isDowngrade: ${isDowngrade})`
     );
 
-    // Actualizar la suscripción con el nuevo precio
+    // Para DOWNGRADES: Programar el cambio para el final del periodo actual
+    if (isDowngrade) {
+      // Primero, liberar cualquier schedule existente (sin cancelar la suscripción)
+      const existingSchedules = await stripe.subscriptionSchedules.list({
+        customer: currentSubscription.customer,
+        limit: 10,
+      });
+
+      // Liberar schedules activos para esta suscripción
+      for (const schedule of existingSchedules.data) {
+        if (schedule.subscription === subscriptionId && schedule.status === 'active') {
+          logger.info(`Releasing existing schedule ${schedule.id}`);
+          await stripe.subscriptionSchedules.release(schedule.id);
+        }
+      }
+
+      // Crear un schedule para cambiar el plan al final del periodo
+      const schedule = await stripe.subscriptionSchedules.create({
+        from_subscription: subscriptionId,
+      });
+
+      // Actualizar el schedule con las fases
+      const currentPeriodEnd = currentSubscription.current_period_end;
+      
+      await stripe.subscriptionSchedules.update(schedule.id, {
+        end_behavior: 'release', // La suscripción continúa después del schedule
+        phases: [
+          {
+            // Fase 1: Mantener plan actual hasta el final del periodo
+            items: [{ price: currentPriceId, quantity: 1 }],
+            start_date: currentSubscription.current_period_start,
+            end_date: currentPeriodEnd,
+          },
+          {
+            // Fase 2: Cambiar al nuevo plan
+            items: [{ price: newPriceId, quantity: 1 }],
+            start_date: currentPeriodEnd,
+            iterations: 1, // Al menos un periodo, luego se libera
+          },
+        ],
+      });
+
+      logger.info(
+        `Downgrade scheduled: ${subscriptionId} will change to ${newPriceId} on ${new Date(currentPeriodEnd * 1000).toISOString()}`
+      );
+
+      // Retornar la suscripción actual (no ha cambiado aún)
+      // Pero añadir info del cambio pendiente
+      return {
+        ...currentSubscription,
+        scheduled_change: {
+          newPriceId,
+          effectiveDate: currentPeriodEnd,
+          scheduleId: schedule.id,
+        },
+      };
+    }
+
+    // Para UPGRADES: Aplicar inmediatamente con prorrateo
     const updatedSubscription = await stripe.subscriptions.update(
       subscriptionId,
       {
@@ -474,7 +538,8 @@ export const updateSubscriptionPlan = async ({
           },
         ],
         proration_behavior: prorationBehavior,
-        // billing_cycle_anchor: 'unchanged', // Mantener el ciclo de facturación
+        // Forzar facturación inmediata en upgrades para cobrar la diferencia
+        payment_behavior: 'error_if_incomplete',
       }
     );
 

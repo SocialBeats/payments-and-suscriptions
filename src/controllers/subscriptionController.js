@@ -2,7 +2,7 @@ import Subscription from '../models/Subscription.js';
 import * as stripeService from '../services/stripeService.js';
 import * as spaceService from '../services/spaceService.js';
 import logger from '../../logger.js';
-import { getValidPlans, comparePlans } from '../config/plans.config.js';
+import { getValidPlans, comparePlans, getDefaultFreePlan, FREE_PLAN } from '../config/plans.config.js';
 
 /**
  * Crear una sesión de checkout de Stripe
@@ -220,11 +220,11 @@ export const createFreeContract = async (req, res) => {
       });
     }
 
-    // Validar que el plan sea BASIC (gratuito)
-    if (plan !== 'BASIC') {
+    // Validar que el plan sea FREE (gratuito)
+    if (plan !== FREE_PLAN) {
       return res.status(400).json({
         error: 'INVALID_PLAN',
-        message: 'This endpoint only creates BASIC (free) plans',
+        message: `This endpoint only creates ${FREE_PLAN} (free) plans`,
       });
     }
 
@@ -249,14 +249,14 @@ export const createFreeContract = async (req, res) => {
     logger.info(`✅ Stripe customer created/retrieved: ${customer.id}`);
 
     // 3. Crear suscripción gratuita en Stripe
-    const freePriceId = stripeService.getPriceIdForPlan('BASIC');
+    const freePriceId = stripeService.getPriceIdForPlan(FREE_PLAN);
     const stripeSubscription = await stripeService.createFreeSubscription({
       customerId: customer.id,
       priceId: freePriceId,
       metadata: {
         userId,
         username,
-        planType: 'BASIC',
+        planType: FREE_PLAN,
       },
     });
 
@@ -271,7 +271,7 @@ export const createFreeContract = async (req, res) => {
         userId,
         username,
         email: customerEmail,
-        planType: 'BASIC',
+        planType: FREE_PLAN,
         status: 'active',
         stripeCustomerId: customer.id,
         stripeSubscriptionId: stripeSubscription.id,
@@ -402,6 +402,28 @@ export const updateSubscriptionPlan = async (req, res) => {
       planType
     );
 
+    // Si hay un downgrade pendiente y el usuario quiere hacer upgrade, cancelar el schedule
+    if (subscription.metadata?.scheduleId) {
+      try {
+        logger.info(`Releasing pending schedule ${subscription.metadata.scheduleId}`);
+        // Usar release() en lugar de cancel() para mantener la suscripción activa
+        await stripeService.stripe.subscriptionSchedules.release(subscription.metadata.scheduleId);
+        
+        // Limpiar metadata
+        subscription.metadata = {
+          ...subscription.metadata,
+          pendingPlanChange: undefined,
+          pendingChangeDate: undefined,
+          scheduleId: undefined,
+        };
+        await subscription.save();
+        logger.info('Pending schedule released successfully, subscription remains active');
+      } catch (error) {
+        // Si el schedule ya no existe o ya fue procesado, continuar
+        logger.warn(`Could not release schedule: ${error.message}`);
+      }
+    }
+
     // Si es upgrade a plan de pago, verificar que tenga método de pago
     if (isUpgrade && newPrice > 0) {
       logger.info(
@@ -499,24 +521,137 @@ export const updateSubscriptionPlan = async (req, res) => {
     // Determinar el comportamiento de prorrateo inteligente
     let effectiveProrationBehavior = prorationBehavior;
 
-    // Si no se especificó, usar comportamiento inteligente
+    // Para upgrades: prorrateo inmediato
+    // Para downgrades: programar cambio al final del periodo
     if (prorationBehavior === 'create_prorations') {
       effectiveProrationBehavior = isUpgrade
-        ? 'create_prorations' // Upgrade: cobrar diferencia y acceso inmediato
-        : 'none'; // Downgrade: mantener plan hasta fin de periodo
+        ? 'always_invoice' // Upgrade: cobrar diferencia inmediatamente
+        : 'none'; // Downgrade: no crear cargos (el cambio se programa)
 
       logger.info(
         `Auto-detected ${isUpgrade ? 'upgrade' : 'downgrade'}, using proration: ${effectiveProrationBehavior}`
       );
     }
 
-    // Actualizar en Stripe
+    // Verificar si la suscripción en Stripe está cancelada
+    let stripeSubscription;
+    try {
+      stripeSubscription = await stripeService.getSubscription(subscription.stripeSubscriptionId);
+    } catch (error) {
+      logger.error(`Could not retrieve Stripe subscription: ${error.message}`);
+    }
+
+    // Si la suscripción está cancelada en Stripe, crear una nueva
+    if (stripeSubscription && stripeSubscription.status === 'canceled') {
+      logger.info(`Stripe subscription is canceled, creating new subscription for user ${userId}`);
+      
+      // Crear nueva suscripción
+      const newSubscription = await stripeService.stripe.subscriptions.create({
+        customer: subscription.stripeCustomerId,
+        items: [{ price: newPriceId }],
+        payment_behavior: 'error_if_incomplete',
+        proration_behavior: 'none',
+        metadata: {
+          userId,
+          username,
+          planType,
+        },
+      });
+
+      // Actualizar en base de datos
+      subscription.stripeSubscriptionId = newSubscription.id;
+      subscription.stripePriceId = newPriceId;
+      subscription.planType = planType;
+      subscription.status = newSubscription.status;
+      subscription.currentPeriodStart = new Date(newSubscription.current_period_start * 1000);
+      subscription.currentPeriodEnd = new Date(newSubscription.current_period_end * 1000);
+      subscription.metadata = {
+        ...subscription.metadata,
+        pendingPlanChange: undefined,
+        pendingChangeDate: undefined,
+        scheduleId: undefined,
+      };
+      await subscription.save();
+
+      logger.info(`New subscription created: ${newSubscription.id}`);
+
+      // Actualizar SPACE
+      try {
+        await spaceService.updateSpaceContract({ userId, plan: planType });
+        logger.info(`SPACE contract updated to ${planType}`);
+      } catch (error) {
+        logger.error(`Failed to update SPACE contract: ${error.message}`);
+      }
+
+      return res.status(200).json({
+        message: 'New subscription created successfully',
+        subscription: {
+          planType,
+          status: newSubscription.status,
+          currentPeriodStart: subscription.currentPeriodStart,
+          currentPeriodEnd: subscription.currentPeriodEnd,
+          isActive: newSubscription.status === 'active',
+        },
+        change: {
+          type: 'new_subscription',
+          from: subscription.planType,
+          to: planType,
+        },
+        proration: {
+          behavior: 'none',
+          note: 'New subscription created. Full price charged for this billing period.',
+        },
+      });
+    }
+
+    // Actualizar en Stripe (suscripción activa)
     const updatedStripeSubscription =
       await stripeService.updateSubscriptionPlan({
         subscriptionId: subscription.stripeSubscriptionId,
         newPriceId,
         prorationBehavior: effectiveProrationBehavior,
+        isDowngrade: !isUpgrade, // Pasar flag de downgrade
       });
+
+    // Para downgrades, el plan NO cambia inmediatamente en nuestra DB
+    // Solo se programa el cambio en Stripe
+    if (!isUpgrade && updatedStripeSubscription.scheduled_change) {
+      logger.info(`Downgrade scheduled for user ${userId}, keeping current plan until period end`);
+      
+      // Guardar info del cambio pendiente en metadata
+      subscription.metadata = {
+        ...subscription.metadata,
+        pendingPlanChange: planType,
+        pendingChangeDate: new Date(updatedStripeSubscription.scheduled_change.effectiveDate * 1000),
+        scheduleId: updatedStripeSubscription.scheduled_change.scheduleId,
+      };
+      await subscription.save();
+
+      // NO actualizar SPACE todavía - el webhook lo hará cuando el cambio sea efectivo
+
+      return res.status(200).json({
+        message: 'Plan change scheduled successfully',
+        subscription: {
+          planType: subscription.planType, // Plan actual (no cambia aún)
+          status: subscription.status,
+          currentPeriodStart: subscription.currentPeriodStart,
+          currentPeriodEnd: subscription.currentPeriodEnd,
+          isActive: subscription.isActive(),
+        },
+        change: {
+          type: 'downgrade',
+          from: subscription.planType,
+          to: planType,
+          effectiveDate: new Date(updatedStripeSubscription.scheduled_change.effectiveDate * 1000),
+        },
+        proration: {
+          behavior: 'scheduled',
+          note: `You will keep your ${subscription.planType} plan until ${new Date(updatedStripeSubscription.scheduled_change.effectiveDate * 1000).toLocaleDateString()}. Then it will change to ${planType}.`,
+        },
+      });
+    }
+
+    // Para upgrades, actualizar inmediatamente en base de datos
 
     // Actualizar en base de datos
     subscription.planType = planType;
@@ -813,14 +948,14 @@ export const cancelSubscription = async (req, res) => {
     if (immediate) {
       try {
         // Crear suscripción FREE en Stripe
-        const freePriceId = stripeService.getPriceIdForPlan('BASIC');
+        const freePriceId = stripeService.getPriceIdForPlan(FREE_PLAN);
         const freeSubscription = await stripeService.createFreeSubscription({
           customerId: subscription.stripeCustomerId,
           priceId: freePriceId,
           metadata: {
             userId,
             username: subscription.username,
-            planType: 'BASIC',
+            planType: FREE_PLAN,
           },
         });
 
@@ -829,7 +964,7 @@ export const cancelSubscription = async (req, res) => {
         // Actualizar en base de datos con nueva suscripción FREE
         subscription.stripeSubscriptionId = freeSubscription.id;
         subscription.stripePriceId = freePriceId;
-        subscription.planType = 'BASIC';
+        subscription.planType = FREE_PLAN;
         subscription.status = 'active';
         subscription.currentPeriodStart = new Date(
           freeSubscription.current_period_start * 1000
@@ -841,7 +976,7 @@ export const cancelSubscription = async (req, res) => {
         subscription.canceledAt = new Date();
         await subscription.save();
 
-        // Downgrade a BASIC en SPACE
+        // Downgrade a FREE en SPACE
         await spaceService.cancelSpaceContract(userId);
 
         logger.info(`User ${userId} downgraded to FREE plan successfully`);
@@ -954,6 +1089,11 @@ export const handleWebhook = async (req, res) => {
 
       case 'invoice.payment_failed':
         await handlePaymentFailed(event.data.object);
+        break;
+
+      case 'subscription_schedule.completed':
+      case 'subscription_schedule.released':
+        await handleScheduleCompleted(event.data.object);
         break;
 
       default:
@@ -1135,21 +1275,21 @@ const handleSubscriptionDeleted = async (stripeSubscription) => {
 
     try {
       // Crear suscripción FREE automáticamente
-      const freePriceId = stripeService.getPriceIdForPlan('BASIC');
+      const freePriceId = stripeService.getPriceIdForPlan(FREE_PLAN);
       const freeSubscription = await stripeService.createFreeSubscription({
         customerId: subscription.stripeCustomerId || customer,
         priceId: freePriceId,
         metadata: {
           userId: subscription.userId,
           username: subscription.username,
-          planType: 'BASIC',
+          planType: FREE_PLAN,
         },
       });
 
       // Actualizar registro con nueva suscripción FREE
       subscription.stripeSubscriptionId = freeSubscription.id;
       subscription.stripePriceId = freePriceId;
-      subscription.planType = 'BASIC';
+      subscription.planType = FREE_PLAN;
       subscription.status = 'active';
       subscription.currentPeriodStart = new Date(
         freeSubscription.current_period_start * 1000
@@ -1171,11 +1311,11 @@ const handleSubscriptionDeleted = async (stripeSubscription) => {
       await subscription.save();
     }
 
-    // Downgrade a BASIC en SPACE
+    // Downgrade a FREE en SPACE
     try {
       await spaceService.cancelSpaceContract(subscription.userId);
       logger.info(
-        `SPACE contract downgraded to BASIC for user ${subscription.userId}`
+        `SPACE contract downgraded to FREE for user ${subscription.userId}`
       );
     } catch (error) {
       logger.error(`Failed to cancel SPACE contract: ${error.message}`);
@@ -1245,6 +1385,72 @@ const handlePaymentFailed = async (invoice) => {
     // TODO: Enviar notificación al usuario sobre el pago fallido
   } catch (error) {
     logger.error(`Error handling payment failed: ${error.message}`);
+    throw error;
+  }
+};
+
+/**
+ * Manejar evento subscription_schedule.completed o released
+ * Este evento se dispara cuando un schedule (downgrade programado) se completa
+ */
+const handleScheduleCompleted = async (schedule) => {
+  try {
+    const { subscription: subscriptionId, customer } = schedule;
+
+    if (!subscriptionId) {
+      logger.warn('Schedule completed without subscription ID');
+      return;
+    }
+
+    logger.info(`Schedule completed for subscription ${subscriptionId}`);
+
+    // Obtener la suscripción actualizada de Stripe
+    const stripeSubscription = await stripeService.getSubscription(subscriptionId);
+    const priceId = stripeSubscription.items.data[0]?.price.id;
+    const planType = stripeService.getPlanTypeFromPriceId(priceId);
+
+    // Buscar en nuestra DB
+    const subscription = await Subscription.findOne({
+      $or: [{ stripeSubscriptionId: subscriptionId }, { stripeCustomerId: customer }],
+    });
+
+    if (!subscription) {
+      logger.warn(`Subscription not found for schedule: ${subscriptionId}`);
+      return;
+    }
+
+    // Actualizar en DB con el nuevo plan
+    const previousPlan = subscription.planType;
+    subscription.planType = planType;
+    subscription.stripePriceId = priceId;
+    subscription.status = stripeSubscription.status;
+    subscription.currentPeriodStart = new Date(stripeSubscription.current_period_start * 1000);
+    subscription.currentPeriodEnd = new Date(stripeSubscription.current_period_end * 1000);
+    
+    // Limpiar metadata del schedule pendiente
+    subscription.metadata = {
+      ...subscription.metadata,
+      pendingPlanChange: undefined,
+      pendingChangeDate: undefined,
+      scheduleId: undefined,
+    };
+    
+    await subscription.save();
+
+    logger.info(`Subscription downgrade completed: ${previousPlan} -> ${planType} for user ${subscription.userId}`);
+
+    // Ahora sí actualizar SPACE con el nuevo plan
+    try {
+      await spaceService.updateSpaceContract({
+        userId: subscription.userId,
+        plan: planType,
+      });
+      logger.info(`SPACE contract updated to ${planType} for user ${subscription.userId}`);
+    } catch (error) {
+      logger.error(`Failed to update SPACE contract: ${error.message}`);
+    }
+  } catch (error) {
+    logger.error(`Error handling schedule completed: ${error.message}`);
     throw error;
   }
 };

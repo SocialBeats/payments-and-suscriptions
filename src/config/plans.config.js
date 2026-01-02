@@ -1,50 +1,173 @@
 /**
  * Configuración centralizada de planes de suscripción
- * Alineado con SPACE pricing YAML
+ * Alineado con SPACE pricing YAML - SocialBeats-latest.yaml
  * 
  * Para actualizar a planes de producción:
  * 1. Actualizar STRIPE_PRICE_* en .env con los nuevos Price IDs
  * 2. Actualizar prices en este archivo si los precios cambian
  * 3. Actualizar features/usageLimits si cambian las características
  * 
- * @see SPACE pricing.yml para definiciones completas de features y limits
+ * @see SocialBeats-latest.yaml para definiciones completas de features y limits
  */
 
 /**
  * Definición de planes disponibles
- * Sincronizado con SPACE pricing.yml
+ * Sincronizado con SocialBeats-latest.yaml
+ * 
+ * Planes:
+ * - FREE: €0.00/mes - Plan gratuito con funcionalidades básicas
+ * - PRO: €9.99/mes - Plan profesional con más límites y features
+ * - STUDIO: €19.99/mes - Plan más avanzado con todo desbloqueado
  */
 export const PLANS = {
-  BASIC: {
-    name: 'BASIC',
-    displayName: 'Basic',
-    description: 'Enjoy daily news about the SPACE!',
+  FREE: {
+    name: 'FREE',
+    displayName: 'Free',
+    description: 'Free plan',
     price: 0.0, // EUR
     unit: 'user/month',
-    stripePriceId: process.env.STRIPE_PRICE_BASIC,
+    stripePriceId: process.env.STRIPE_PRICE_FREE,
     features: {
-      news: true,
-      sideAds: true,
-      bottomAd: true,
+      // Profile
+      advancedProfile: true,
+      banner: false,
+      certificates: true,
+      decoratives: false,
+      // Beats
+      beats: true,
+      beatSize: true,
+      storage: true,
+      downloads: false,
+      cover: false,
+      promotedBeat: false,
+      // Interactions
+      publicPlaylists: true,
+      playlists: true,
+      collaborators: true,
+      beatsPerPlaylist: true,
+      privatePlaylists: false,
+      // Analytics
+      dashboards: true,
+      coreMetrics: true,
+      proMetrics: false,
+      studioMetrics: false,
     },
     usageLimits: {
-      maxNews: 2, // por día
+      // Profile
+      maxCertificates: 5,
+      // Beats
+      maxBeats: 3,
+      maxBeatSize: 10, // MB
+      maxStorage: 30, // MB
+      // Interactions
+      maxPlaylists: 1,
+      maxCollaborators: 3,
+      maxBeatsPerPlaylist: 3,
+      // Analytics
+      maxDashboards: 3,
+      maxCoreMetrics: 3,
+      maxProMetrics: 0,
+      maxStudioMetrics: 0,
     },
   },
-  PREMIUM: {
-    name: 'PREMIUM',
-    displayName: 'Premium',
-    description: 'Disable ads and read more news!',
-    price: 10.0, // EUR
+  PRO: {
+    name: 'PRO',
+    displayName: 'Pro',
+    description: 'Pro plan',
+    price: 9.99, // EUR
     unit: 'user/month',
-    stripePriceId: process.env.STRIPE_PRICE_PREMIUM,
+    stripePriceId: process.env.STRIPE_PRICE_PRO,
     features: {
-      news: true,
-      sideAds: false, // Ads desactivados
-      bottomAd: false, // Ads desactivados
+      // Profile
+      advancedProfile: true,
+      banner: true,
+      certificates: true,
+      decoratives: false,
+      // Beats
+      beats: true,
+      beatSize: true,
+      storage: true,
+      downloads: false,
+      cover: true,
+      promotedBeat: false,
+      // Interactions
+      publicPlaylists: true,
+      playlists: true,
+      collaborators: true,
+      beatsPerPlaylist: true,
+      privatePlaylists: false,
+      // Analytics
+      dashboards: true,
+      coreMetrics: true,
+      proMetrics: true,
+      studioMetrics: false,
     },
     usageLimits: {
-      maxNews: 10, // por día
+      // Profile
+      maxCertificates: 10,
+      // Beats
+      maxBeats: 30,
+      maxBeatSize: 25, // MB
+      maxStorage: 750, // MB
+      // Interactions
+      maxPlaylists: 10,
+      maxCollaborators: 10,
+      maxBeatsPerPlaylist: 30,
+      // Analytics
+      maxDashboards: 30,
+      maxCoreMetrics: 30,
+      maxProMetrics: 30,
+      maxStudioMetrics: 0,
+    },
+  },
+  STUDIO: {
+    name: 'STUDIO',
+    displayName: 'Studio',
+    description: 'Most advanced plan',
+    price: 19.99, // EUR
+    unit: 'user/month',
+    stripePriceId: process.env.STRIPE_PRICE_STUDIO,
+    features: {
+      // Profile
+      advancedProfile: true,
+      banner: true,
+      certificates: true,
+      decoratives: true,
+      // Beats
+      beats: true,
+      beatSize: true,
+      storage: true,
+      downloads: true,
+      cover: true,
+      promotedBeat: false,
+      // Interactions
+      publicPlaylists: true,
+      playlists: true,
+      collaborators: true,
+      beatsPerPlaylist: true,
+      privatePlaylists: true,
+      // Analytics
+      dashboards: true,
+      coreMetrics: true,
+      proMetrics: true,
+      studioMetrics: true,
+    },
+    usageLimits: {
+      // Profile
+      maxCertificates: Infinity,
+      // Beats
+      maxBeats: Infinity,
+      maxBeatSize: 50, // MB
+      maxStorage: 1000, // MB
+      // Interactions
+      maxPlaylists: Infinity,
+      maxCollaborators: 30,
+      maxBeatsPerPlaylist: 250,
+      // Analytics
+      maxDashboards: Infinity,
+      maxCoreMetrics: Infinity,
+      maxProMetrics: Infinity,
+      maxStudioMetrics: Infinity,
     },
   },
 };
@@ -143,7 +266,7 @@ export const getPlanNameFromPriceId = (priceId) => {
  * @returns {string} Nombre del plan gratuito
  */
 export const getDefaultFreePlan = () => {
-  return 'BASIC';
+  return 'FREE';
 };
 
 /**

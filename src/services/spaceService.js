@@ -16,7 +16,7 @@ if (process.env.NODE_ENV === 'production' && SPACE_API_KEY === 'default-key') {
  * @param {Object} params - Parámetros del contrato
  * @param {string} params.userId - ID del usuario
  * @param {string} params.username - Nombre de usuario
- * @param {string} params.plan - Plan contratado (BASIC, PRO, PREMIUM)
+ * @param {string} params.plan - Plan contratado (FREE, PRO, STUDIO)
  * @param {Object} params.addOns - Add-ons adicionales (opcional)
  * @returns {Promise<void>}
  */
@@ -50,7 +50,7 @@ export const createSpaceContract = async ({
 
             // Actualizar plan existente
             await spaceClient.contracts.updateContractSubscription(userId, {
-              contractedServices: { news: '1.0' },
+              contractedServices: { [SPACE_SERVICE_NAME]: 'latest' },
               subscriptionPlans: { [SPACE_SERVICE_NAME]: plan },
               subscriptionAddOns: addOns,
             });
@@ -73,7 +73,7 @@ export const createSpaceContract = async ({
             await spaceClient.contracts.addContract({
               userContact: { userId, username },
               billingPeriod: { autoRenew: true, renewalDays: 30 },
-              contractedServices: { [SPACE_SERVICE_NAME]: '1.0' },
+              contractedServices: { [SPACE_SERVICE_NAME]: 'latest' },
               subscriptionPlans: { [SPACE_SERVICE_NAME]: plan },
               subscriptionAddOns: addOns,
             });
@@ -132,7 +132,7 @@ export const updateSpaceContract = async ({ userId, plan, addOns = {} }) => {
       spaceClient.on('synchronized', async () => {
         try {
           await spaceClient.contracts.updateContractSubscription(userId, {
-            contractedServices: { news: '1.0' },
+            contractedServices: { [SPACE_SERVICE_NAME]: 'latest' },
             subscriptionPlans: { [SPACE_SERVICE_NAME]: plan },
             subscriptionAddOns: addOns,
           });
@@ -181,8 +181,8 @@ export const cancelSpaceContract = async (userId) => {
         try {
           // Downgrade a FREE o marcar como inactivo
           await spaceClient.contracts.updateContractSubscription(userId, {
-            contractedServices: { [SPACE_SERVICE_NAME]: '1.0' },
-            subscriptionPlans: { [SPACE_SERVICE_NAME]: 'BASIC' },
+            contractedServices: { [SPACE_SERVICE_NAME]: 'latest' },
+            subscriptionPlans: { [SPACE_SERVICE_NAME]: 'FREE' },
             subscriptionAddOns: {},
           });
 

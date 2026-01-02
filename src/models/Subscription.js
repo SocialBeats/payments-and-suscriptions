@@ -82,10 +82,10 @@ const subscriptionSchema = new mongoose.Schema(
       ],
       default: 'incomplete',
     },
-    // Plan contratado (FREE es interno, BASIC y PREMIUM vienen de SPACE)
+    // Plan contratado (FREE, PRO, STUDIO - sincronizado con SPACE)
     planType: {
       type: String,
-      enum: ['FREE', 'BASIC', 'PREMIUM'],
+      enum: ['FREE', 'PRO', 'STUDIO'],
       default: 'FREE',
     },
     // Fechas de periodo de facturación
