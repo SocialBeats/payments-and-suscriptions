@@ -23,7 +23,7 @@ async function processEvent(event) {
   switch (event.type) {
     case 'USER_DELETED':
       try {
-        const userId = data._id;
+        const userId = data.userId;
         logger.info(`Processing USER_DELETED for user ${userId}`);
 
         // Buscar todas las suscripciones del usuario
@@ -34,9 +34,8 @@ async function processEvent(event) {
           try {
             // Cancelar suscripción en Stripe si existe
             if (subscription.stripeSubscriptionId) {
-              await stripeService.cancelSubscription(
+              await stripeService.cancelSubscriptionImmediately(
                 subscription.stripeSubscriptionId,
-                true // Cancelar inmediatamente
               );
               logger.info(`Canceled Stripe subscription ${subscription.stripeSubscriptionId}`);
             }
