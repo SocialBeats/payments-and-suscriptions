@@ -96,10 +96,7 @@ const subscriptionSchema = new mongoose.Schema(
           enum: [
             'decoratives',
             'promotedBeat',
-            'privatePlaylists',
-            'unlockFullBeatFree',
-            'unlockFullBeatPro',
-            'fullStudioMetrics',
+            'extraDashboard',
           ],
           required: true,
         },

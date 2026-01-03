@@ -4,7 +4,8 @@ import { spaceClient } from '../utils/spaceConnection.js';
 // Validación de configuración de SPACE
 const SPACE_URL = process.env.SPACE_URL || 'http://localhost:5403';
 const SPACE_API_KEY = process.env.SPACE_API_KEY || 'default-key';
-const SPACE_SERVICE_NAME = process.env.SPACE_SERVICE_NAME || 'news';
+const SPACE_SERVICE_NAME = process.env.SPACE_SERVICE_NAME || 'socialbeats';
+const SPACE_SERVICE_VERSION = process.env.SPACE_SERVICE_VERSION || '1.0';
 
 if (process.env.NODE_ENV === 'production' && SPACE_API_KEY === 'default-key') {
   logger.warn('WARNING: Using default SPACE_API_KEY in production');
@@ -42,7 +43,7 @@ export const createSpaceContract = async ({
 
         // Actualizar plan existente
         await spaceClient.contracts.updateContractSubscription(userId, {
-          contractedServices: { [SPACE_SERVICE_NAME]: 'latest' },
+          contractedServices: { [SPACE_SERVICE_NAME]: SPACE_SERVICE_VERSION },
           subscriptionPlans: { [SPACE_SERVICE_NAME]: plan },
           subscriptionAddOns: addOns,
         });
@@ -63,7 +64,7 @@ export const createSpaceContract = async ({
         await spaceClient.contracts.addContract({
           userContact: { userId, username },
           billingPeriod: { autoRenew: true, renewalDays: 30 },
-          contractedServices: { [SPACE_SERVICE_NAME]: 'latest' },
+          contractedServices: { [SPACE_SERVICE_NAME]: SPACE_SERVICE_VERSION },
           subscriptionPlans: { [SPACE_SERVICE_NAME]: plan },
           subscriptionAddOns: addOns,
         });
@@ -94,7 +95,7 @@ export const updateSpaceContract = async ({ userId, plan, addOns = {} }) => {
     logger.info(`Updating SPACE contract for user ${userId} to plan: ${plan}`);
 
     await spaceClient.contracts.updateContractSubscription(userId, {
-      contractedServices: { [SPACE_SERVICE_NAME]: 'latest' },
+      contractedServices: { [SPACE_SERVICE_NAME]: SPACE_SERVICE_VERSION },
       subscriptionPlans: { [SPACE_SERVICE_NAME]: plan },
       subscriptionAddOns: addOns,
     });
@@ -118,7 +119,7 @@ export const cancelSpaceContract = async (userId) => {
 
     // Downgrade a FREE o marcar como inactivo
     await spaceClient.contracts.updateContractSubscription(userId, {
-      contractedServices: { [SPACE_SERVICE_NAME]: 'latest' },
+      contractedServices: { [SPACE_SERVICE_NAME]: SPACE_SERVICE_VERSION },
       subscriptionPlans: { [SPACE_SERVICE_NAME]: 'FREE' },
       subscriptionAddOns: {},
     });

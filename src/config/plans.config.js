@@ -1,18 +1,18 @@
 /**
  * Configuración centralizada de planes de suscripción y AddOns
- * Alineado con SPACE pricing YAML - SocialBeats-latest.yaml
+ * Alineado con SPACE pricing YAML - SocialBeats-1.0.yaml
  *
  * Para actualizar a planes de producción:
  * 1. Actualizar STRIPE_PRICE_* en .env con los nuevos Price IDs
  * 2. Actualizar prices en este archivo si los precios cambian
  * 3. Actualizar features/usageLimits si cambian las características
  *
- * @see SocialBeats-latest.yaml para definiciones completas de features y limits
+ * @see SocialBeats-1.0.yaml para definiciones completas de features y limits
  */
 
 /**
  * Definición de planes disponibles
- * Sincronizado con SocialBeats-latest.yaml
+ * Sincronizado con SocialBeats-1.0.yaml
  *
  * Planes:
  * - FREE: €0.00/mes - Plan gratuito con funcionalidades básicas
@@ -48,9 +48,6 @@ export const PLANS = {
       privatePlaylists: false,
       // Analytics
       dashboards: true,
-      coreMetrics: true,
-      proMetrics: false,
-      studioMetrics: false,
     },
     usageLimits: {
       // Profile
@@ -65,9 +62,6 @@ export const PLANS = {
       maxBeatsPerPlaylist: 3,
       // Analytics
       maxDashboards: 3,
-      maxCoreMetrics: 3,
-      maxProMetrics: 0,
-      maxStudioMetrics: 0,
     },
   },
   PRO: {
@@ -98,9 +92,6 @@ export const PLANS = {
       privatePlaylists: false,
       // Analytics
       dashboards: true,
-      coreMetrics: true,
-      proMetrics: true,
-      studioMetrics: false,
     },
     usageLimits: {
       // Profile
@@ -115,9 +106,6 @@ export const PLANS = {
       maxBeatsPerPlaylist: 30,
       // Analytics
       maxDashboards: 30,
-      maxCoreMetrics: 30,
-      maxProMetrics: 30,
-      maxStudioMetrics: 0,
     },
   },
   STUDIO: {
@@ -148,9 +136,6 @@ export const PLANS = {
       privatePlaylists: true,
       // Analytics
       dashboards: true,
-      coreMetrics: true,
-      proMetrics: true,
-      studioMetrics: true,
     },
     usageLimits: {
       // Profile
@@ -165,9 +150,6 @@ export const PLANS = {
       maxBeatsPerPlaylist: 250,
       // Analytics
       maxDashboards: Infinity,
-      maxCoreMetrics: Infinity,
-      maxProMetrics: Infinity,
-      maxStudioMetrics: Infinity,
     },
   },
 };
@@ -272,7 +254,7 @@ export const getDefaultFreePlan = () => {
 /**
  * ============================================================================
  * ADDONS CONFIGURATION
- * Sincronizado con SocialBeats-latest.yaml
+ * Sincronizado con SocialBeats-1.0.yaml
  * ============================================================================
  */
 
@@ -282,10 +264,7 @@ export const getDefaultFreePlan = () => {
  * AddOns:
  * - decoratives: €0.99/mes - Decorativos para foto de perfil
  * - promotedBeat: €2.99/mes - Promocionar beats
- * - privatePlaylists: €2.99/mes - Playlists privadas
- * - unlockFullBeatFree: €1.49/mes - Desbloquear métricas completas (FREE)
- * - unlockFullBeatPro: €1.49/mes - Desbloquear métricas Studio (PRO)
- * - fullStudioMetrics: €19.99/mes - Métricas Studio ilimitadas
+ * - extraDashboard: €1.49/mes - Dashboard extra
  */
 export const ADDONS = {
   decoratives: {
@@ -316,47 +295,18 @@ export const ADDONS = {
     },
     usageLimitsExtensions: {},
   },
-  unlockFullBeatFree: {
-    name: 'unlockFullBeatFree',
-    displayName: 'Métricas Completas',
-    description: 'Desbloquea todas las métricas para un beat (Plan FREE)',
+  extraDashboard: {
+    name: 'extraDashboard',
+    displayName: 'Dashboard Extra',
+    description: 'Añade un dashboard adicional a tu cuenta',
     price: 1.49, // EUR
     unit: 'user/month',
-    stripePriceId: process.env.STRIPE_PRICE_ADDON_UNLOCK_FREE,
-    availableFor: ['FREE'],
+    stripePriceId: process.env.STRIPE_PRICE_ADDON_EXTRA_DASHBOARD,
+    availableFor: ['FREE', 'PRO'],
     icon: '📊',
     features: {},
     usageLimitsExtensions: {
-      maxProMetrics: 1,
-      maxStudioMetrics: 1,
-    },
-  },
-  unlockFullBeatPro: {
-    name: 'unlockFullBeatPro',
-    displayName: 'Métricas Studio',
-    description: 'Desbloquea métricas Studio para un beat (Plan PRO)',
-    price: 1.49, // EUR
-    unit: 'user/month',
-    stripePriceId: process.env.STRIPE_PRICE_ADDON_UNLOCK_PRO,
-    availableFor: ['PRO'],
-    icon: '📈',
-    features: {},
-    usageLimitsExtensions: {
-      maxStudioMetrics: 1,
-    },
-  },
-  fullStudioMetrics: {
-    name: 'fullStudioMetrics',
-    displayName: 'Studio Metrics Ilimitado',
-    description: 'Desbloquea métricas Studio para todos tus beats para siempre',
-    price: 19.99, // EUR
-    unit: 'user/month',
-    stripePriceId: process.env.STRIPE_PRICE_ADDON_FULL_STUDIO,
-    availableFor: ['FREE', 'PRO'],
-    icon: '👑',
-    features: {},
-    usageLimitsExtensions: {
-      maxStudioMetrics: Infinity,
+      maxDashboards: 1,
     },
   },
 };
