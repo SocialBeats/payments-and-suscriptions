@@ -82,12 +82,41 @@ const subscriptionSchema = new mongoose.Schema(
       ],
       default: 'incomplete',
     },
-    // Plan contratado (FREE es interno, BASIC y PREMIUM vienen de SPACE)
+    // Plan contratado (FREE, PRO, STUDIO - sincronizado con SPACE)
     planType: {
       type: String,
-      enum: ['FREE', 'BASIC', 'PREMIUM'],
+      enum: ['FREE', 'PRO', 'STUDIO'],
       default: 'FREE',
     },
+    // AddOns activos - Array de objetos con info de cada AddOn
+    activeAddOns: [
+      {
+        name: {
+          type: String,
+          enum: [
+            'decoratives',
+            'promotedBeat',
+            'extraDashboard',
+          ],
+          required: true,
+        },
+        stripeSubscriptionItemId: {
+          type: String, // ID del item dentro de la suscripción de Stripe
+        },
+        stripePriceId: {
+          type: String,
+        },
+        purchasedAt: {
+          type: Date,
+          default: Date.now,
+        },
+        status: {
+          type: String,
+          enum: ['active', 'canceled', 'pending'],
+          default: 'active',
+        },
+      },
+    ],
     // Fechas de periodo de facturación
     currentPeriodStart: {
       type: Date,
@@ -130,6 +159,22 @@ subscriptionSchema.methods.canRenew = function () {
     !this.cancelAtPeriodEnd &&
     this.currentPeriodEnd &&
     this.currentPeriodEnd > new Date()
+  );
+};
+
+// Método para verificar si un AddOn está activo
+subscriptionSchema.methods.hasAddOn = function (addonName) {
+  return this.activeAddOns?.some(
+    (addon) => addon.name === addonName && addon.status === 'active'
+  );
+};
+
+// Método para obtener los nombres de AddOns activos
+subscriptionSchema.methods.getActiveAddOnNames = function () {
+  return (
+    this.activeAddOns
+      ?.filter((addon) => addon.status === 'active')
+      .map((addon) => addon.name) || []
   );
 };
 
