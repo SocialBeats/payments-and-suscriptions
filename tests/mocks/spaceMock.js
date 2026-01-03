@@ -8,7 +8,7 @@ import { vi } from 'vitest';
 export const mockContract = {
   userId: 'user-123',
   username: 'testuser',
-  contractedServices: { socialbeats: 'latest' },
+  contractedServices: { socialbeats: '1.0' },
   subscriptionPlans: { socialbeats: 'PRO' },
   subscriptionAddOns: {},
   billingPeriod: { autoRenew: true, renewalDays: 30 },

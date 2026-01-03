@@ -200,9 +200,7 @@ describe('AddOns Configuration', () => {
     it('should have expected addons', () => {
       expect(ADDONS).toHaveProperty('decoratives');
       expect(ADDONS).toHaveProperty('promotedBeat');
-      expect(ADDONS).toHaveProperty('unlockFullBeatFree');
-      expect(ADDONS).toHaveProperty('unlockFullBeatPro');
-      expect(ADDONS).toHaveProperty('fullStudioMetrics');
+      expect(ADDONS).toHaveProperty('extraDashboard');
     });
 
     it('each addon should have required properties', () => {
@@ -296,10 +294,10 @@ describe('AddOns Configuration', () => {
       expect(isAddOnAvailableForPlan('promotedBeat', 'STUDIO')).toBe(true);
     });
 
-    it('unlockFullBeatFree should only be available for FREE', () => {
-      expect(isAddOnAvailableForPlan('unlockFullBeatFree', 'FREE')).toBe(true);
-      expect(isAddOnAvailableForPlan('unlockFullBeatFree', 'PRO')).toBe(false);
-      expect(isAddOnAvailableForPlan('unlockFullBeatFree', 'STUDIO')).toBe(false);
+    it('extraDashboard should be available for FREE and PRO', () => {
+      expect(isAddOnAvailableForPlan('extraDashboard', 'FREE')).toBe(true);
+      expect(isAddOnAvailableForPlan('extraDashboard', 'PRO')).toBe(true);
+      expect(isAddOnAvailableForPlan('extraDashboard', 'STUDIO')).toBe(false);
     });
 
     it('should return false for invalid addon', () => {
@@ -317,8 +315,8 @@ describe('AddOns Configuration', () => {
 
       expect(Array.isArray(addons)).toBe(true);
       expect(addons.some((a) => a.name === 'decoratives')).toBe(true);
-      expect(addons.some((a) => a.name === 'unlockFullBeatFree')).toBe(true);
-      // promotedBeat should NOT be included
+      expect(addons.some((a) => a.name === 'extraDashboard')).toBe(true);
+      // promotedBeat should NOT be included for FREE
       expect(addons.some((a) => a.name === 'promotedBeat')).toBe(false);
     });
 
@@ -328,7 +326,7 @@ describe('AddOns Configuration', () => {
       expect(Array.isArray(addons)).toBe(true);
       expect(addons.some((a) => a.name === 'decoratives')).toBe(true);
       expect(addons.some((a) => a.name === 'promotedBeat')).toBe(true);
-      expect(addons.some((a) => a.name === 'unlockFullBeatPro')).toBe(true);
+      expect(addons.some((a) => a.name === 'extraDashboard')).toBe(true);
     });
 
     it('should return empty array for STUDIO (has all features built-in)', () => {

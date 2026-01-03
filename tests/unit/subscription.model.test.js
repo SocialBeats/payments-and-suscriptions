@@ -275,10 +275,7 @@ describe('Subscription Model', () => {
       const validAddons = [
         'decoratives',
         'promotedBeat',
-        'privatePlaylists',
-        'unlockFullBeatFree',
-        'unlockFullBeatPro',
-        'fullStudioMetrics',
+        'extraDashboard',
       ];
 
       for (const addonName of validAddons) {

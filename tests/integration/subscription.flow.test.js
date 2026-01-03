@@ -99,7 +99,7 @@ describe('Integration: User Subscription Flows', () => {
         // Check that only FREE-compatible addons are available
         const addonNames = res.body.availableAddOns.map((a) => a.name);
         expect(addonNames).toContain('decoratives');
-        expect(addonNames).toContain('unlockFullBeatFree');
+        expect(addonNames).toContain('extraDashboard');
         expect(addonNames).not.toContain('promotedBeat'); // Not available for FREE
       }
     });
@@ -171,8 +171,8 @@ describe('Integration: User Subscription Flows', () => {
 
       const addonNames = res.body.availableAddOns.map((a) => a.name);
       expect(addonNames).toContain('promotedBeat'); // Available for PRO
-      expect(addonNames).toContain('unlockFullBeatPro');
-      expect(addonNames).not.toContain('unlockFullBeatFree'); // Only for FREE
+      expect(addonNames).toContain('extraDashboard');
+      expect(addonNames).toContain('decoratives');
     });
   });
 
