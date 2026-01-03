@@ -44,25 +44,36 @@ describe('Subscription Controller', () => {
     });
 
     it('should return subscription when user has one', async () => {
-      // Create a subscription first
+      // Create a completely independent user for this test to avoid race conditions
+      const uniqueUserId = `user-get-sub-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const uniqueUsername = `getsubuser_${Date.now()}`;
+      const uniqueToken = generateTestToken({
+        id: uniqueUserId,
+        username: uniqueUsername,
+      });
+      const uniqueCustomerId = `cus_sub_test_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
       await Subscription.create({
-        userId: testUserId,
-        username: testUsername,
-        email: `${testUsername}@test.com`,
+        userId: uniqueUserId,
+        username: uniqueUsername,
+        email: `${uniqueUsername}@test.com`,
         planType: 'PRO',
         status: 'active',
-        stripeCustomerId: `cus_${Date.now()}`,
+        stripeCustomerId: uniqueCustomerId,
       });
 
       const res = await api
         .get('/api/v1/payments/subscription')
-        .set('Authorization', `Bearer ${testToken}`);
+        .set('Authorization', `Bearer ${uniqueToken}`);
 
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty('subscription');
       expect(res.body.subscription.planType).toBe('PRO');
       expect(res.body.subscription.status).toBe('active');
       expect(res.body.subscription.isActive).toBe(true);
+      
+      // Cleanup
+      await Subscription.deleteMany({ userId: uniqueUserId });
     });
 
     it('should work with gateway headers', async () => {
