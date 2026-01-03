@@ -1,3 +1,34 @@
+# Release v1.0.0
+
+## Features
+- feat: add-ons features added and managed
+- feat: actualized pricing plan and subscription logic to socialbeats pricing
+
+## Tests
+- test: test suite for microservice
+
+## Documentation
+No documentation changes.
+## Fixes
+- fix: update microservice to adapt to new socialbeats-1.0.yaml
+- fix: one failed test
+- fix: tests modified to run on GitHub Action
+- fix: modify .env.example to solve pr test problem
+- fix: externalized space connection to create a single connection for all operations
+- fix: user deleted event
+
+## Continuous integration (CI)
+No CI changes.
+## Other changes
+- Merge pull request #12 from SocialBeats/feat/updated-yaml
+- Merge pull request #10 from SocialBeats/feat/tests
+- Merge pull request #9 from SocialBeats/feat/socialbeats-pricing
+- Merge pull request #8 from SocialBeats/hotfix/delete-user-event
+
+## Full commit history
+
+For full commit history, see [here](https://github.com/SocialBeats/payments-and-suscriptions/compare/v0.0.3...v1.0.0).
+
 # Release v0.0.3
 
 ## Features
