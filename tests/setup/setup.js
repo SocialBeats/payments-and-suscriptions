@@ -26,7 +26,7 @@ beforeAll(async () => {
       }
     }
   }
-}, 10000); // 10s timeout for connection
+}, 30000); // 30s timeout for CI environments
 
 afterAll(async () => {
   // Clean DB at end of test run

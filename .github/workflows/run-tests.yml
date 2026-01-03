@@ -42,13 +42,20 @@ jobs:
       - name: Wait for MongoDB to be ready
         run: |
           echo "Waiting for MongoDB on port 27017..."
-          for i in {1..30}; do
+          for i in {1..60}; do
             nc -z localhost 27017 && echo "MongoDB is ready!" && break
-            echo "Still waiting..."
+            echo "Still waiting... (attempt $i/60)"
             sleep 2
           done
+          # Final check
+          if ! nc -z localhost 27017; then
+            echo "MongoDB did not start in time!"
+            exit 1
+          fi
 
       - name: Run tests with coverage
+        env:
+          MONGOTESTURL: mongodb://localhost:27017/payments-and-subscriptions_test
         run: npm run test:coverage
 
       - name: Upload coverage report

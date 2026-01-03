@@ -2,6 +2,10 @@
  * Test environment configuration
  * Sets up environment variables BEFORE any modules are imported
  */
+import dotenv from 'dotenv';
+
+// Load .env file first to get local configuration
+dotenv.config();
 
 // Disable Kafka for tests
 process.env.ENABLE_KAFKA = 'false';
@@ -10,7 +14,9 @@ process.env.NODE_ENV = 'test';
 process.env.LOG_LEVEL = 'error';
 
 // MongoDB Test Configuration
-process.env.MONGOTESTURL = process.env.MONGOTESTURL || 'mongodb://localhost:27020/payments-and-subscriptions_test';
+// Use port 27017 as default (standard MongoDB port, used in GitHub Actions)
+// For local development with docker-compose, set MONGOTESTURL in .env to use port 27020
+process.env.MONGOTESTURL = process.env.MONGOTESTURL || 'mongodb://localhost:27017/payments-and-subscriptions_test';
 
 // JWT Secret for tests
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-key-for-testing-only';
