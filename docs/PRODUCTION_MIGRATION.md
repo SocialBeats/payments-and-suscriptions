@@ -1,118 +1,85 @@
 # 📋 Guía de Migración a Planes de Producción
 
-## ✅ Centralización Completada
+## ✅ Migración Completada - SocialBeats-latest.yaml
 
-Se ha creado un sistema centralizado de configuración de planes que facilita la actualización a los planes reales de producción.
+Se ha actualizado el sistema de planes para reflejar el pricing definitivo de SocialBeats.
+
+### Planes Actualizados
+
+| Plan | Precio | Descripción |
+|------|--------|-------------|
+| **FREE** | €0.00/mes | Plan gratuito con funcionalidades básicas |
+| **PRO** | €9.99/mes | Plan profesional con más límites y features |
+| **STUDIO** | €19.99/mes | Plan más avanzado con todo desbloqueado |
 
 ### Archivos Modificados
 
-1. **NUEVO**: `src/config/plans.config.js` - Configuración centralizada de todos los planes
-2. **ACTUALIZADO**: `src/controllers/subscriptionController.js` - Usa `getValidPlans()` y `comparePlans()`
-3. **ACTUALIZADO**: `src/services/stripeService.js` - Usa funciones centralizadas
+1. **`src/config/plans.config.js`** - Configuración centralizada con FREE, PRO, STUDIO
+2. **`src/controllers/subscriptionController.js`** - Actualizado para usar FREE_PLAN
+3. **`src/services/stripeService.js`** - Actualizado PRICE_IDS legacy
+4. **`src/services/spaceService.js`** - Actualizado plan por defecto a FREE
+5. **`.env*`** - Variables STRIPE_PRICE_FREE, STRIPE_PRICE_PRO, STRIPE_PRICE_STUDIO
 
 ### Estructura Actual
 
 ```javascript
 PLANS = {
-  BASIC: {
-    name: 'BASIC',
-    price: 0.0 EUR,
-    stripePriceId: process.env.STRIPE_PRICE_BASIC,
-    features: { news: true, sideAds: true, bottomAd: true },
-    usageLimits: { maxNews: 2 }
+  FREE: {
+    name: 'FREE',
+    price: 0.0, // EUR
+    stripePriceId: process.env.STRIPE_PRICE_FREE,
+    features: {
+      advancedProfile: true, banner: false, certificates: true, decoratives: false,
+      beats: true, beatSize: true, storage: true, downloads: false, cover: false,
+      publicPlaylists: true, playlists: true, collaborators: true, privatePlaylists: false,
+      dashboards: true, coreMetrics: true, proMetrics: false, studioMetrics: false,
+    },
+    usageLimits: {
+      maxCertificates: 5, maxBeats: 3, maxBeatSize: 10, maxStorage: 30,
+      maxPlaylists: 1, maxCollaborators: 3, maxBeatsPerPlaylist: 3,
+      maxDashboards: 3, maxCoreMetrics: 3, maxProMetrics: 0, maxStudioMetrics: 0,
+    }
   },
-  PREMIUM: {
-    name: 'PREMIUM',
-    price: 10.0 EUR,
-    stripePriceId: process.env.STRIPE_PRICE_PREMIUM,
-    features: { news: true, sideAds: false, bottomAd: false },
-    usageLimits: { maxNews: 10 }
+  PRO: {
+    name: 'PRO',
+    price: 9.99, // EUR
+    stripePriceId: process.env.STRIPE_PRICE_PRO,
+    // ... features y limits extendidos
+  },
+  STUDIO: {
+    name: 'STUDIO',
+    price: 19.99, // EUR
+    stripePriceId: process.env.STRIPE_PRICE_STUDIO,
+    // ... features y limits máximos (muchos Infinity)
   }
 }
 ```
 
 ---
 
-## 🔄 Pasos para Migrar a Planes Reales
+## 🔧 Siguiente Paso: Crear Price IDs en Stripe
 
-### 1. Obtener los nuevos Price IDs de Stripe
+### 1. Crear productos en Stripe Dashboard
 
-En el Dashboard de Stripe (producción):
-- Crea los productos/precios para tus planes reales
-- Anota los `price_xxxxx` IDs generados
+Ve a https://dashboard.stripe.com/products y crea 3 productos:
 
-### 2. Actualizar el archivo `.env`
+1. **SocialBeats FREE** - €0.00/mes (recurring)
+2. **SocialBeats PRO** - €9.99/mes (recurring)
+3. **SocialBeats STUDIO** - €19.99/mes (recurring)
+
+### 2. Copiar los Price IDs
+
+Cada producto generará un `price_xxxxx`. Cópialos.
+
+### 3. Actualizar `.env`
 
 ```env
-# ANTES (testing)
-STRIPE_PRICE_BASIC=price_1SiacrPKbLZoYa8MUF2j4H7R
-STRIPE_PRICE_PREMIUM=price_1SiadQPKbLZoYa8MyxsF2XPz
-
-# DESPUÉS (producción) - Ejemplo
-STRIPE_PRICE_BASIC=price_1RealBasicPriceID123
-STRIPE_PRICE_PREMIUM=price_1RealPremiumPriceID456
+STRIPE_PRICE_FREE=price_tu_free_id_aqui
+STRIPE_PRICE_PRO=price_tu_pro_id_aqui
+STRIPE_PRICE_STUDIO=price_tu_studio_id_aqui
 ```
 
-### 3. Actualizar `src/config/plans.config.js`
-
-Solo necesitas modificar:
-
-```javascript
-export const PLANS = {
-  BASIC: {
-    name: 'BASIC',
-    displayName: 'Basic',
-    description: 'Enjoy daily news about the SPACE!',
-    price: 0.0, // ← Cambiar si el precio cambia
-    unit: 'user/month',
-    stripePriceId: process.env.STRIPE_PRICE_BASIC, // ← Ya usa .env
-    features: {
-      news: true,
-      sideAds: true,
-      bottomAd: true,
-    },
-    usageLimits: {
-      maxNews: 2, // ← Ajustar si cambia el límite
-    },
-  },
-  PREMIUM: {
-    name: 'PREMIUM',
-    displayName: 'Premium',
-    description: 'Disable ads and read more news!',
-    price: 10.0, // ← Cambiar al precio real
-    unit: 'user/month',
-    stripePriceId: process.env.STRIPE_PRICE_PREMIUM, // ← Ya usa .env
-    features: {
-      news: true,
-      sideAds: false,
-      bottomAd: false,
-    },
-    usageLimits: {
-      maxNews: 10, // ← Ajustar si cambia el límite
-    },
-  },
-};
-```
-
-### 4. Si los nombres de planes cambian
-
-Si en lugar de `BASIC` y `PREMIUM` usas otros nombres (ej: `FREE`, `PRO`, `ENTERPRISE`):
-
-1. Renombrar las keys en `PLANS` object
-2. Actualizar `.env` con las nuevas variables:
-   ```env
-   STRIPE_PRICE_FREE=price_xxx
-   STRIPE_PRICE_PRO=price_yyy
-   STRIPE_PRICE_ENTERPRISE=price_zzz
-   ```
-3. Actualizar `FREE_PLAN` en `plans.config.js`:
-   ```javascript
-   export const getDefaultFreePlan = () => {
-     return 'FREE'; // o el nombre de tu plan gratuito
-   };
-   ```
-
-### 5. Reiniciar el servicio
+### 4. Reiniciar servicio
 
 ```bash
 cd payments-and-suscriptions
@@ -121,79 +88,39 @@ docker-compose restart
 
 ---
 
-## 🧪 Testing
-
-### Verificar configuración cargada
-
-```javascript
-import { PLANS, getValidPlans, comparePlans } from './config/plans.config.js';
-
-console.log('Planes válidos:', getValidPlans());
-console.log('Config BASIC:', PLANS.BASIC);
-console.log('Config PREMIUM:', PLANS.PREMIUM);
-```
-
-### Test de upgrade/downgrade
-
-```javascript
-const result = comparePlans('BASIC', 'PREMIUM');
-console.log(result);
-// { isUpgrade: true, currentPrice: 0, newPrice: 10, priceDiff: 10 }
-```
-
----
-
 ## ⚠️ Checklist Pre-Producción
 
-- [ ] Price IDs de Stripe creados en producción
-- [ ] `.env` actualizado con nuevos Price IDs
-- [ ] `plans.config.js` actualizado con precios reales
-- [ ] Nombres de planes actualizados (si aplica)
-- [ ] Límites de uso actualizados (si aplica)
-- [ ] Variables de entorno en servidor de producción actualizadas
-- [ ] Servicio reiniciado con nueva configuración
-- [ ] Probado upgrade BASIC → PREMIUM
-- [ ] Probado downgrade PREMIUM → BASIC
-- [ ] Probado creación de usuario con plan FREE
-- [ ] Webhooks de Stripe configurados con URL de producción
+- [x] Planes actualizados a FREE, PRO, STUDIO
+- [x] Precios configurados (€0, €9.99, €19.99)
+- [x] Features y limits sincronizados con YAML
+- [x] SPACE_SERVICE_NAME actualizado a "socialbeats"
+- [ ] **PENDIENTE**: Crear Price IDs en Stripe Dashboard
+- [ ] **PENDIENTE**: Actualizar .env con Price IDs reales
+- [ ] Probar creación de usuario con plan FREE
+- [ ] Probar upgrade FREE → PRO
+- [ ] Probar upgrade PRO → STUDIO
+- [ ] Probar downgrade STUDIO → PRO → FREE
+- [ ] Webhooks de Stripe configurados
 
 ---
 
-## 📝 Información para pasarme
+## 📝 AddOns (Futuro)
 
-Cuando tengas los planes reales, pásame:
+El YAML también define AddOns que se pueden implementar en el futuro:
 
-```
-PLAN: BASIC
-- Price ID: price_xxxxx
-- Precio: €X.XX
-- Features: { ... }
-- Usage Limits: { maxNews: X }
-
-PLAN: PREMIUM
-- Price ID: price_yyyyy
-- Precio: €Y.YY
-- Features: { ... }
-- Usage Limits: { maxNews: Y }
-```
-
-Y haré los cambios en ~2 minutos.
-
----
-
-## 🎯 Ventajas de esta implementación
-
-✅ **Un solo archivo** para actualizar precios y configuración
-✅ **Type-safe** con funciones helper
-✅ **Escalable** - Fácil añadir más planes (PRO, ENTERPRISE, etc.)
-✅ **Consistente** - Misma lógica en todo el código
-✅ **Documentado** - Sincronizado con SPACE pricing.yml
-✅ **Testeable** - Funciones puras para testing
+| AddOn | Precio | Disponible para |
+|-------|--------|-----------------|
+| decoratives | €0.99/mes | FREE, PRO |
+| promotedBeat | €2.99/mes | PRO, STUDIO |
+| privatePlaylists | €2.99/mes | FREE, PRO |
+| unlockFullBeatFree | €1.49/mes | FREE |
+| unlockFullBeatPro | €1.49/mes | PRO |
+| fullStudioMetrics | €19.99/mes | FREE, PRO |
 
 ---
 
 ## 📚 Referencias
 
 - Configuración: `src/config/plans.config.js`
-- SPACE Pricing: `space-socialbeats/pricing.yml`
-- Stripe Dashboard: https://dashboard.stripe.com/prices
+- SPACE Pricing: `SocialBeats-latest.yaml`
+- Stripe Dashboard: https://dashboard.stripe.com/products

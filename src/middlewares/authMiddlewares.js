@@ -11,6 +11,11 @@ const openPaths = [
   '/api/v1/payments/internal', // Ruta interna protegida por API Key, no JWT
 ];
 
+// Rutas donde la autenticación es opcional (intentamos autenticar si hay token)
+const optionalAuthPaths = [
+  '/api/v1/payments/addons', // GET addons es público pero filtra si hay auth
+];
+
 /**
  * Middleware de autenticación con soporte dual:
  * 1. Headers del API Gateway (producción)
@@ -29,6 +34,13 @@ const verifyToken = (req, res, next) => {
   if (openPaths.some((path) => fullPath.startsWith(path))) {
     return next();
   }
+
+  // Comprobar si es una ruta con autenticación opcional
+  const isOptionalAuth = optionalAuthPaths.some((path) => 
+    fullPath === path || (fullPath.startsWith(path) && fullPath[path.length] === '/')
+  );
+  // Solo el GET exacto a /api/v1/payments/addons es opcional, /my y otros requieren auth
+  const isExactOptionalPath = fullPath === '/api/v1/payments/addons';
 
   // Validar que la ruta incluya versión de API (usando originalUrl)
   if (!fullPath.startsWith('/api/v')) {
@@ -60,6 +72,12 @@ const verifyToken = (req, res, next) => {
   // Opción 2: Verificar JWT directo (para Swagger/testing)
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    // Si es ruta con auth opcional y solo GET /api/v1/addons, permitir sin auth
+    if (isExactOptionalPath && req.method === 'GET') {
+      logger.debug(`Optional auth path ${fullPath} accessed without authentication`);
+      return next();
+    }
+    
     logger.warn(
       `Unauthenticated request to ${req.path} - No authentication found`
     );
@@ -88,6 +106,12 @@ const verifyToken = (req, res, next) => {
     next();
   } catch (error) {
     logger.warn(`JWT verification failed: ${error.message}`);
+
+    // Si es ruta con auth opcional y el JWT falló, continuar sin user
+    if (isExactOptionalPath && req.method === 'GET') {
+      logger.debug(`Optional auth path ${fullPath} - JWT invalid but allowing without auth`);
+      return next();
+    }
 
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({

@@ -1,5 +1,5 @@
-import { connect } from 'space-node-client';
 import logger from '../../logger.js';
+import { spaceClient } from '../utils/spaceConnection.js';
 
 // Validación de configuración de SPACE
 const SPACE_URL = process.env.SPACE_URL || 'http://localhost:5403';
@@ -16,7 +16,7 @@ if (process.env.NODE_ENV === 'production' && SPACE_API_KEY === 'default-key') {
  * @param {Object} params - Parámetros del contrato
  * @param {string} params.userId - ID del usuario
  * @param {string} params.username - Nombre de usuario
- * @param {string} params.plan - Plan contratado (BASIC, PRO, PREMIUM)
+ * @param {string} params.plan - Plan contratado (FREE, PRO, STUDIO)
  * @param {Object} params.addOns - Add-ons adicionales (opcional)
  * @returns {Promise<void>}
  */
@@ -26,86 +26,58 @@ export const createSpaceContract = async ({
   plan,
   addOns = {},
 }) => {
-  return new Promise((resolve, reject) => {
+  try {
+    logger.info(
+      `Creating SPACE contract for user ${userId} (${username}) with plan: ${plan}`
+    );
+
     try {
-      logger.info(
-        `Creating SPACE contract for user ${userId} (${username}) with plan: ${plan}`
-      );
+      // Intentar obtener contrato existente
+      const existingContract = await spaceClient.contracts.getContract(userId);
 
-      const spaceClient = connect({
-        url: SPACE_URL,
-        apiKey: SPACE_API_KEY,
-      });
+      if (existingContract) {
+        logger.info(
+          `Contract already exists for user ${userId}. Updating to plan: ${plan}`
+        );
 
-      spaceClient.on('synchronized', async () => {
-        try {
-          // Intentar obtener contrato existente
-          const existingContract =
-            await spaceClient.contracts.getContract(userId);
+        // Actualizar plan existente
+        await spaceClient.contracts.updateContractSubscription(userId, {
+          contractedServices: { [SPACE_SERVICE_NAME]: 'latest' },
+          subscriptionPlans: { [SPACE_SERVICE_NAME]: plan },
+          subscriptionAddOns: addOns,
+        });
 
-          if (existingContract) {
-            logger.info(
-              `Contract already exists for user ${userId}. Updating to plan: ${plan}`
-            );
-
-            // Actualizar plan existente
-            await spaceClient.contracts.updateContractSubscription(userId, {
-              contractedServices: { news: '1.0' },
-              subscriptionPlans: { [SPACE_SERVICE_NAME]: plan },
-              subscriptionAddOns: addOns,
-            });
-
-            logger.info(
-              `SPACE contract updated successfully for user ${userId}`
-            );
-            resolve();
-          }
-        } catch (error) {
-          // Si no existe, crear nuevo contrato
-          if (
-            error.message?.includes('not found') ||
-            error.response?.status === 404
-          ) {
-            logger.info(
-              `No existing contract found. Creating new contract for ${userId}`
-            );
-
-            await spaceClient.contracts.addContract({
-              userContact: { userId, username },
-              billingPeriod: { autoRenew: true, renewalDays: 30 },
-              contractedServices: { [SPACE_SERVICE_NAME]: '1.0' },
-              subscriptionPlans: { [SPACE_SERVICE_NAME]: plan },
-              subscriptionAddOns: addOns,
-            });
-
-            logger.info(
-              `SPACE contract created successfully for user ${userId}`
-            );
-            resolve();
-          } else {
-            // Otro tipo de error
-            logger.error(
-              `Error checking/creating SPACE contract: ${error.message}`
-            );
-            reject(error);
-          }
-        }
-      });
-
-      spaceClient.on('error', (error) => {
-        logger.error(`SPACE client error: ${error.message}`);
-        reject(error);
-      });
-
-      // Timeout de seguridad
-      setTimeout(() => {
-        reject(new Error('SPACE contract creation timeout'));
-      }, 10000); // 10 segundos
+        logger.info(`SPACE contract updated successfully for user ${userId}`);
+        return;
+      }
     } catch (error) {
-      logger.error(`Error in createSpaceContract: ${error.message}`);
-      reject(error);
+      // Si no existe, crear nuevo contrato
+      if (
+        error.message?.includes('not found') ||
+        error.response?.status === 404
+      ) {
+        logger.info(
+          `No existing contract found. Creating new contract for ${userId}`
+        );
+
+        await spaceClient.contracts.addContract({
+          userContact: { userId, username },
+          billingPeriod: { autoRenew: true, renewalDays: 30 },
+          contractedServices: { [SPACE_SERVICE_NAME]: 'latest' },
+          subscriptionPlans: { [SPACE_SERVICE_NAME]: plan },
+          subscriptionAddOns: addOns,
+        });
+
+        logger.info(`SPACE contract created successfully for user ${userId}`);
+        return;
+      }
+      // Otro tipo de error
+      throw error;
     }
-  });
+  } catch (error) {
+    logger.error(`Error in createSpaceContract: ${error.message}`);
+    throw error;
+  }
 };
 
 /**
@@ -118,47 +90,20 @@ export const createSpaceContract = async ({
  * @returns {Promise<void>}
  */
 export const updateSpaceContract = async ({ userId, plan, addOns = {} }) => {
-  return new Promise((resolve, reject) => {
-    try {
-      logger.info(
-        `Updating SPACE contract for user ${userId} to plan: ${plan}`
-      );
+  try {
+    logger.info(`Updating SPACE contract for user ${userId} to plan: ${plan}`);
 
-      const spaceClient = connect({
-        url: SPACE_URL,
-        apiKey: SPACE_API_KEY,
-      });
+    await spaceClient.contracts.updateContractSubscription(userId, {
+      contractedServices: { [SPACE_SERVICE_NAME]: 'latest' },
+      subscriptionPlans: { [SPACE_SERVICE_NAME]: plan },
+      subscriptionAddOns: addOns,
+    });
 
-      spaceClient.on('synchronized', async () => {
-        try {
-          await spaceClient.contracts.updateContractSubscription(userId, {
-            contractedServices: { news: '1.0' },
-            subscriptionPlans: { [SPACE_SERVICE_NAME]: plan },
-            subscriptionAddOns: addOns,
-          });
-
-          logger.info(`SPACE contract updated successfully for user ${userId}`);
-          resolve();
-        } catch (error) {
-          logger.error(`Error updating SPACE contract: ${error.message}`);
-          reject(error);
-        }
-      });
-
-      spaceClient.on('error', (error) => {
-        logger.error(`SPACE client error: ${error.message}`);
-        reject(error);
-      });
-
-      // Timeout de seguridad
-      setTimeout(() => {
-        reject(new Error('SPACE contract update timeout'));
-      }, 10000);
-    } catch (error) {
-      logger.error(`Error in updateSpaceContract: ${error.message}`);
-      reject(error);
-    }
-  });
+    logger.info(`SPACE contract updated successfully for user ${userId}`);
+  } catch (error) {
+    logger.error(`Error in updateSpaceContract: ${error.message}`);
+    throw error;
+  }
 };
 
 /**
@@ -168,48 +113,23 @@ export const updateSpaceContract = async ({ userId, plan, addOns = {} }) => {
  * @returns {Promise<void>}
  */
 export const cancelSpaceContract = async (userId) => {
-  return new Promise((resolve, reject) => {
-    try {
-      logger.info(`Canceling SPACE contract for user ${userId}`);
+  try {
+    logger.info(`Canceling SPACE contract for user ${userId}`);
 
-      const spaceClient = connect({
-        url: SPACE_URL,
-        apiKey: SPACE_API_KEY,
-      });
+    // Downgrade a FREE o marcar como inactivo
+    await spaceClient.contracts.updateContractSubscription(userId, {
+      contractedServices: { [SPACE_SERVICE_NAME]: 'latest' },
+      subscriptionPlans: { [SPACE_SERVICE_NAME]: 'FREE' },
+      subscriptionAddOns: {},
+    });
 
-      spaceClient.on('synchronized', async () => {
-        try {
-          // Downgrade a FREE o marcar como inactivo
-          await spaceClient.contracts.updateContractSubscription(userId, {
-            contractedServices: { [SPACE_SERVICE_NAME]: '1.0' },
-            subscriptionPlans: { [SPACE_SERVICE_NAME]: 'BASIC' },
-            subscriptionAddOns: {},
-          });
-
-          logger.info(
-            `SPACE contract canceled (downgraded to FREE) for user ${userId}`
-          );
-          resolve();
-        } catch (error) {
-          logger.error(`Error canceling SPACE contract: ${error.message}`);
-          reject(error);
-        }
-      });
-
-      spaceClient.on('error', (error) => {
-        logger.error(`SPACE client error: ${error.message}`);
-        reject(error);
-      });
-
-      // Timeout de seguridad
-      setTimeout(() => {
-        reject(new Error('SPACE contract cancellation timeout'));
-      }, 10000);
-    } catch (error) {
-      logger.error(`Error in cancelSpaceContract: ${error.message}`);
-      reject(error);
-    }
-  });
+    logger.info(
+      `SPACE contract canceled (downgraded to FREE) for user ${userId}`
+    );
+  } catch (error) {
+    logger.error(`Error in cancelSpaceContract: ${error.message}`);
+    throw error;
+  }
 };
 
 /**
